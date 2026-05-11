@@ -162,63 +162,92 @@ function renderRoster() {
     if (people.length === 0) {
       panel.innerHTML = `<div style="font-size:11px;color:var(--ink-muted);padding:20px 0;letter-spacing:0.05em;">No talent in this category yet.</div>`;
     } else {
-      const grid = document.createElement('div');
-      grid.className = 'people-grid';
+      const GENDER_ORDER  = ['M', 'F', 'NB'];
+      const GENDER_LABELS = { M: 'Men:', F: 'Women:', NB: 'Non-Binary:' };
 
-      people.forEach(({ name, exclusivity, exclusivitySummary }) => {
-        const card = document.createElement('div');
-        card.className = 'person-card';
-        card.dataset.name = name;
-        card.dataset.category = tab;
-
-        const nameEl = document.createElement('div');
-        nameEl.className = 'person-name';
-
-        const hasExclusivity = exclusivity || exclusivitySummary;
-        if (hasExclusivity) {
-          nameEl.textContent = name;
-          const asterisk = document.createElement('span');
-          asterisk.className = 'exclusivity-asterisk';
-          asterisk.textContent = '*';
-          nameEl.appendChild(asterisk);
-
-          const tooltip = document.createElement('div');
-          tooltip.className = 'exclusivity-tooltip';
-          if (exclusivitySummary) {
-            const h = document.createElement('div');
-            h.className = 'tooltip-heading';
-            h.textContent = 'Exclusivity Summary';
-            const p = document.createElement('div');
-            p.className = 'tooltip-body';
-            p.textContent = exclusivitySummary;
-            tooltip.appendChild(h);
-            tooltip.appendChild(p);
-          }
-          if (exclusivity) {
-            const h = document.createElement('div');
-            h.className = 'tooltip-heading';
-            h.textContent = 'Exclusivity';
-            const p = document.createElement('div');
-            p.className = 'tooltip-body';
-            p.textContent = exclusivity;
-            tooltip.appendChild(h);
-            tooltip.appendChild(p);
-          }
-          card.appendChild(tooltip);
-        } else {
-          nameEl.textContent = name;
-        }
-
-        const catEl = document.createElement('div');
-        catEl.className = 'person-category';
-        catEl.textContent = tab;
-        card.appendChild(nameEl);
-        card.appendChild(catEl);
-        card.addEventListener('click', () => togglePerson(name, tab, card));
-        grid.appendChild(card);
+      const byGender = { M: [], F: [], NB: [] };
+      people.forEach(p => {
+        const g = (p.gender || '').toUpperCase();
+        if (byGender[g] !== undefined) byGender[g].push(p);
       });
 
-      panel.appendChild(grid);
+      const nonEmptyGenders = GENDER_ORDER.filter(g => byGender[g].length > 0);
+
+      nonEmptyGenders.forEach((gender, idx) => {
+        const section = document.createElement('div');
+        section.className = 'gender-section';
+        section.dataset.gender = gender;
+
+        const label = document.createElement('div');
+        label.className = 'gender-label';
+        label.textContent = GENDER_LABELS[gender];
+        section.appendChild(label);
+
+        const grid = document.createElement('div');
+        grid.className = 'people-grid';
+
+        byGender[gender].forEach(({ name, exclusivity, exclusivitySummary }) => {
+          const card = document.createElement('div');
+          card.className = 'person-card';
+          card.dataset.name = name;
+          card.dataset.category = tab;
+
+          const nameEl = document.createElement('div');
+          nameEl.className = 'person-name';
+
+          const hasExclusivity = exclusivity || exclusivitySummary;
+          if (hasExclusivity) {
+            nameEl.textContent = name;
+            const asterisk = document.createElement('span');
+            asterisk.className = 'exclusivity-asterisk';
+            asterisk.textContent = '*';
+            nameEl.appendChild(asterisk);
+
+            const tooltip = document.createElement('div');
+            tooltip.className = 'exclusivity-tooltip';
+            if (exclusivitySummary) {
+              const h = document.createElement('div');
+              h.className = 'tooltip-heading';
+              h.textContent = 'Exclusivity Summary';
+              const p = document.createElement('div');
+              p.className = 'tooltip-body';
+              p.textContent = exclusivitySummary;
+              tooltip.appendChild(h);
+              tooltip.appendChild(p);
+            }
+            if (exclusivity) {
+              const h = document.createElement('div');
+              h.className = 'tooltip-heading';
+              h.textContent = 'Exclusivity';
+              const p = document.createElement('div');
+              p.className = 'tooltip-body';
+              p.textContent = exclusivity;
+              tooltip.appendChild(h);
+              tooltip.appendChild(p);
+            }
+            card.appendChild(tooltip);
+          } else {
+            nameEl.textContent = name;
+          }
+
+          const catEl = document.createElement('div');
+          catEl.className = 'person-category';
+          catEl.textContent = tab;
+          card.appendChild(nameEl);
+          card.appendChild(catEl);
+          card.addEventListener('click', () => togglePerson(name, tab, card));
+          grid.appendChild(card);
+        });
+
+        section.appendChild(grid);
+        panel.appendChild(section);
+
+        if (idx < nonEmptyGenders.length - 1) {
+          const divider = document.createElement('div');
+          divider.className = 'gender-divider';
+          panel.appendChild(divider);
+        }
+      });
     }
 
     rosterPanels.appendChild(panel);
@@ -238,6 +267,17 @@ function filterRoster() {
     const matches = card.dataset.name.toLowerCase().includes(query);
     card.style.display = matches ? '' : 'none';
     if (matches) visibleCount++;
+  });
+
+  // Hide gender sections whose cards are all filtered out; adjust dividers accordingly
+  activePanel.querySelectorAll('.gender-section').forEach(section => {
+    const anyVisible = [...section.querySelectorAll('.person-card')].some(c => c.style.display !== 'none');
+    section.style.display = anyVisible ? '' : 'none';
+  });
+  activePanel.querySelectorAll('.gender-divider').forEach(div => {
+    const prev = div.previousElementSibling;
+    const next = div.nextElementSibling;
+    div.style.display = (prev?.style.display !== 'none' && next?.style.display !== 'none') ? '' : 'none';
   });
 
   let noResults = activePanel.querySelector('.filter-empty');

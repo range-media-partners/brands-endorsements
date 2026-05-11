@@ -342,22 +342,25 @@ function generateDocument(docTitle, featuredNames, allSelections) {
           // Re-apply rich-text formatting (links, bold, italic, underline)
           const richText = richTextMap[key];
           if (richText) {
-            const textEl = bioPara.editAsText();
+            const textEl    = bioPara.editAsText();
+            const contentLen = textEl.getText().length;
             let pos = 0;
             for (const run of richText.getRuns()) {
               const runText = run.getText();
               const runLen  = runText.length;
               if (runLen === 0) continue;
+              if (pos >= contentLen) break;
 
+              const endPos = Math.min(pos + runLen - 1, contentLen - 1);
               const url   = run.getLinkUrl();
               const style = run.getTextStyle();
 
               if (url) {
-                try { textEl.setLinkUrl(pos, pos + runLen - 1, url); } catch (_) {}
+                try { textEl.setLinkUrl(pos, endPos, url); } catch (_) {}
               }
-              if (style.isBold()      !== null) textEl.setBold(pos,      pos + runLen - 1, style.isBold());
-              if (style.isItalic()    !== null) textEl.setItalic(pos,    pos + runLen - 1, style.isItalic());
-              if (style.isUnderline() !== null) textEl.setUnderline(pos, pos + runLen - 1, style.isUnderline());
+              if (style.isBold()      !== null) textEl.setBold(pos,      endPos, style.isBold());
+              if (style.isItalic()    !== null) textEl.setItalic(pos,    endPos, style.isItalic());
+              if (style.isUnderline() !== null) textEl.setUnderline(pos, endPos, style.isUnderline());
 
               pos += runLen;
             }

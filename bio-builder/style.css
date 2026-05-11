@@ -300,6 +300,21 @@ h1 em {
 .people-panel { display: none; }
 .people-panel.active { display: block; }
 
+.gender-label {
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+  color: var(--ink-muted);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-bottom: 10px;
+}
+
+.gender-divider {
+  border: none;
+  border-top: 1px solid var(--rule);
+  margin: 18px 0;
+}
+
 .people-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
