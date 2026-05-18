@@ -1189,10 +1189,12 @@ generateBtn.addEventListener('click', async () => {
       }
       return out;
     }
+    // In grouping mode, allSelections is redundant with groups[].members —
+    // omitting it keeps the payload small and avoids URL length limits.
     const payload = encodeURIComponent(JSON.stringify({
       title,
       featuredNames,
-      allSelections: getOrderedSelections(),
+      allSelections: groupingMode ? [] : getOrderedSelections(),
       groupingMode: groupingMode || null,
       groups: groupingMode ? groups.map((g, idx) => ({
         index: idx,

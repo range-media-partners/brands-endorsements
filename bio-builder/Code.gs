@@ -40,19 +40,23 @@ function doGet(e) {
 
   let result;
 
-  if (action === "getRoster") {
-    result = getRosterData();
-  } else if (action === "generateDocument") {
-    const payload = JSON.parse(e.parameter.payload);
-    result = generateDocument(
-      payload.title,
-      payload.featuredNames  || [],
-      payload.allSelections  || [],
-      payload.groupingMode   || null,
-      payload.groups         || null
-    );
-  } else {
-    result = { status: "Bio Builder is running." };
+  try {
+    if (action === "getRoster") {
+      result = getRosterData();
+    } else if (action === "generateDocument") {
+      const payload = JSON.parse(e.parameter.payload);
+      result = generateDocument(
+        payload.title,
+        payload.featuredNames  || [],
+        payload.allSelections  || [],
+        payload.groupingMode   || null,
+        payload.groups         || null
+      );
+    } else {
+      result = { status: "Bio Builder is running." };
+    }
+  } catch (err) {
+    result = { success: false, error: err.message };
   }
 
   if (callback) {
@@ -160,7 +164,19 @@ function generateDocument(docTitle, featuredNames, allSelections, groupingMode, 
     const dataMap     = {};
     const richTextMap = {};
 
-    const categoriesNeeded = [...new Set(allSelections.map(s => s.category))];
+    // Collect all names needed for the data map — from allSelections plus
+    // any group members (group members are the source of truth in grouping mode).
+    const allNamesNeeded = [];
+    allSelections.forEach(s => allNamesNeeded.push(s));
+    if (groups) {
+      groups.forEach(g => (g.members || []).forEach(m => {
+        if (!allNamesNeeded.some(n => n.name === m.name && n.category === m.category)) {
+          allNamesNeeded.push(m);
+        }
+      }));
+    }
+
+    const categoriesNeeded = [...new Set(allNamesNeeded.map(s => s.category))];
 
     categoriesNeeded.forEach(tabName => {
       const sheet = ss.getSheetByName(tabName);
@@ -168,7 +184,7 @@ function generateDocument(docTitle, featuredNames, allSelections, groupingMode, 
 
       const rows       = sheet.getDataRange().getValues();
       const namesInTab = new Set(
-        allSelections.filter(s => s.category === tabName).map(s => s.name)
+        allNamesNeeded.filter(s => s.category === tabName).map(s => s.name)
       );
 
       for (let i = 1; i < rows.length; i++) {
