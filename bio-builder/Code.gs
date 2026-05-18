@@ -320,25 +320,45 @@ function generateDocument(docTitle, featuredNames, allSelections, groupingMode, 
       let isFirstGroup = true;
 
       groups.forEach(group => {
-        const membersWithBio = (group.members || [])
-          .filter(m => dataMap[`${m.category}::${m.name}`]?.bio)
-          .sort((a, b) => {
+        // Organise members into talent-category → gender buckets,
+        // preserving the drag-drop order of first appearance.
+        const catOrder          = [];
+        const gendersByCategory = {};
+        const membersByBucket   = {};  // 'cat::gender' → [members with bios]
+
+        (group.members || []).forEach(m => {
+          const person = dataMap[`${m.category}::${m.name}`];
+          if (!person?.bio) return;
+          const gender = person.gender || '';
+          const gKey   = `${m.category}::${gender}`;
+          if (!catOrder.includes(m.category))                  catOrder.push(m.category);
+          if (!gendersByCategory[m.category])                  gendersByCategory[m.category] = [];
+          if (!gendersByCategory[m.category].includes(gender)) gendersByCategory[m.category].push(gender);
+          if (!membersByBucket[gKey])                          membersByBucket[gKey] = [];
+          membersByBucket[gKey].push(m);
+        });
+
+        // Apply featured-first sort within each gender bucket
+        Object.keys(membersByBucket).forEach(gKey => {
+          membersByBucket[gKey].sort((a, b) => {
             const aFeat = featuredKeyOrder[`${a.category}::${a.name}`] !== undefined
               ? featuredKeyOrder[`${a.category}::${a.name}`] : Infinity;
             const bFeat = featuredKeyOrder[`${b.category}::${b.name}`] !== undefined
               ? featuredKeyOrder[`${b.category}::${b.name}`] : Infinity;
             return aFeat - bFeat;
           });
-        if (membersWithBio.length === 0) return;
+        });
 
-        // Double blank line between groups (single blank line after the first)
+        if (catOrder.length === 0) return;
+
+        // Two blank lines between groups, one blank line after Featured Talent
         if (!isFirstGroup) {
           body.appendParagraph('').setSpacingBefore(0).setSpacingAfter(0);
           body.appendParagraph('').setSpacingBefore(0).setSpacingAfter(0);
         }
         isFirstGroup = false;
 
-        // Group label — Heading 1 so it appears in the doc navigation sidebar
+        // Group label (Tier/Category name) — Heading 1 for sidebar navigation
         const groupLabel = body.appendParagraph(group.name);
         groupLabel.setHeading(DocumentApp.ParagraphHeading.HEADING1);
         groupLabel.setSpacingBefore(0).setSpacingAfter(0);
@@ -346,14 +366,38 @@ function generateDocument(docTitle, featuredNames, allSelections, groupingMode, 
           .setFontFamily('Arial').setFontSize(11).setBold(true).setUnderline(false)
           .setForegroundColor('#1A1A1A');
 
-        // Bios separated by a blank line within the group
-        let isFirstMember = true;
-        membersWithBio.forEach(m => {
-          if (!isFirstMember) {
+        // Talent categories within this group (mirrors standard-path structure)
+        let isFirstCat = true;
+        catOrder.forEach(cat => {
+          const genders = gendersByCategory[cat] || [];
+
+          // Blank line before each talent category except the first
+          if (!isFirstCat) {
             body.appendParagraph('').setSpacingBefore(0).setSpacingAfter(0);
           }
-          isFirstMember = false;
-          writeBio(`${m.category}::${m.name}`);
+          isFirstCat = false;
+
+          // Talent category label (bold, not a heading — same as standard path)
+          const catLabel = body.appendParagraph(cat);
+          catLabel.setSpacingBefore(0).setSpacingAfter(0);
+          catLabel.editAsText()
+            .setFontFamily('Arial').setFontSize(11).setBold(true).setForegroundColor('#1A1A1A');
+
+          // Gender groups within this talent category
+          let isFirstGender = true;
+          genders.forEach(gender => {
+            const members = membersByBucket[`${cat}::${gender}`] || [];
+            if (members.length === 0) return;
+
+            // Blank line before each gender group except the first
+            if (!isFirstGender) {
+              body.appendParagraph('').setSpacingBefore(0).setSpacingAfter(0);
+            }
+            isFirstGender = false;
+
+            // Bios within the same gender run consecutively with no blank line
+            members.forEach(m => writeBio(`${m.category}::${m.name}`));
+          });
         });
       });
 
