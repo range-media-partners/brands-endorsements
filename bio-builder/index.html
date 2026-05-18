@@ -43,6 +43,18 @@
       </div>
     </section>
 
+    <!-- GROUPING -->
+    <section class="grouping-section fade-in" id="groupingSection">
+      <div class="grouping-use-row">
+        <span class="grouping-use-label">Use:</span>
+        <button class="grouping-mode-btn" id="btnModeTiers" data-mode="tiers">Tiers</button>
+        <button class="grouping-mode-btn" id="btnModeCategories" data-mode="categories">Categories</button>
+      </div>
+      <div class="grouping-groups-area" id="groupingGroupsArea" style="display:none;">
+        <div class="grouping-groups-list" id="groupingGroupsList"></div>
+      </div>
+    </section>
+
     <!-- ROSTER -->
     <section class="tabs-section fade-in">
       <div class="section-label">Select Talent</div>
@@ -110,6 +122,14 @@
       <span id="footerCount"></span>
     </footer>
 
+  </div>
+
+  <!-- TIER CONFLICT MODAL -->
+  <div class="tier-modal-overlay" id="tierModalOverlay">
+    <div class="tier-modal">
+      <div class="tier-modal-text" id="tierModalText"></div>
+      <button class="tier-modal-btn" id="tierModalDismiss">OK</button>
+    </div>
   </div>
 
   <script src="app.js"></script>

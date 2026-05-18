@@ -62,6 +62,17 @@ let peopleOrderByGroup    = {};  // { 'Film/TV::M': ['Alice', 'Bob'], ... }
 let collapsedCategories   = new Set();
 let collapsedGenders      = new Set();  // keyed as 'category::gender'
 
+// ─── GROUPING STATE ────────────────────────────────────────────
+const GROUP_COLORS = [
+  '#4A7BB5', '#B5774A', '#8B4AB5', '#4AB589', '#B54A4A',
+  '#9AB54A', '#4A9AB5', '#B59A4A', '#B54A8B', '#4AB5B5'
+];
+
+let groupingMode  = null;  // 'tiers' | 'categories' | null
+let groups        = [];    // [{ id, name, members: [{name, category}] }]
+let activeGroupId = null;
+let _nextGroupId  = 1;
+
 // ─── DRAG STATE ────────────────────────────────────────────────
 let _handleActive  = false;  // true only while a drag-handle is held
 let _dragSrc       = null;
@@ -364,36 +375,43 @@ function getOrderedSelections() {
 }
 
 // Reads category / gender / person order back from the live DOM after a drop.
-// Only updates state for levels that are expanded (body present in DOM).
-// Collapsed levels are untouched so their data survives the re-order.
+// Routes writes to the active group's hierarchy when grouping is on.
 function syncOrderFromDOM() {
-  // Category order is always readable — the cat-blocks themselves are never hidden
-  categoryOrder = [
+  const ag = (groupingMode && activeGroupId) ? getGroupById(activeGroupId) : null;
+
+  const newCatOrder = [
     ...document.querySelectorAll('.selected-list > .tray-cat-block')
   ].map(el => el.dataset.category);
 
-  categoryOrder.forEach(cat => {
-    // catBody is absent when the category is collapsed — skip if so
+  if (ag) ag.catOrder = newCatOrder;
+  else     categoryOrder = newCatOrder;
+
+  newCatOrder.forEach(cat => {
     const catBody = document.querySelector(
       `.tray-cat-block[data-category="${CSS.escape(cat)}"] > .tray-cat-body`
     );
     if (!catBody) return;
 
-    genderOrderByCategory[cat] = [
+    const newGenders = [
       ...catBody.querySelectorAll(':scope > .tray-gender-block')
     ].map(el => el.dataset.gender);
 
-    (genderOrderByCategory[cat] || []).forEach(gender => {
-      const groupKey = `${cat}::${gender}`;
-      // genderBody is absent when the gender group is collapsed — skip if so
+    if (ag) ag.gendersByCategory[cat] = newGenders;
+    else     genderOrderByCategory[cat] = newGenders;
+
+    newGenders.forEach(gender => {
+      const groupKey  = `${cat}::${gender}`;
       const genderBody = catBody.querySelector(
         `.tray-gender-block[data-gender="${CSS.escape(gender)}"] > .tray-gender-body`
       );
       if (!genderBody) return;
 
-      peopleOrderByGroup[groupKey] = [
+      const newPeople = [
         ...genderBody.querySelectorAll(':scope > .selected-row')
       ].map(el => el.dataset.name);
+
+      if (ag) ag.peopleByGroup[groupKey] = newPeople;
+      else     peopleOrderByGroup[groupKey] = newPeople;
     });
   });
 }
@@ -446,8 +464,335 @@ function initDrag(el, container) {
   });
 }
 
+// ─── GROUPING HELPERS ──────────────────────────────────────────
+function groupColor(idx) { return GROUP_COLORS[idx % GROUP_COLORS.length]; }
+function getGroupById(id) { return groups.find(g => g.id === id); }
+function getGroupIndex(id) { return groups.findIndex(g => g.id === id); }
+
+function getPersonGroups(name, category) {
+  return groups.filter(g => g.members.some(m => m.name === name && m.category === category));
+}
+
+function addPersonToGroup(name, category, groupId) {
+  const g = getGroupById(groupId);
+  if (!g || g.members.some(m => m.name === name && m.category === category)) return;
+  g.members.push({ name, category });
+  // Mirror into group's own hierarchy state
+  const gender = getGender(name, category);
+  const gKey   = `${category}::${gender}`;
+  if (!g.catOrder.includes(category))                  g.catOrder.push(category);
+  if (!g.gendersByCategory[category])                  g.gendersByCategory[category] = [];
+  if (!g.gendersByCategory[category].includes(gender)) g.gendersByCategory[category].push(gender);
+  if (!g.peopleByGroup[gKey])                          g.peopleByGroup[gKey] = [];
+  if (!g.peopleByGroup[gKey].includes(name))           g.peopleByGroup[gKey].push(name);
+}
+
+function removePersonFromGroup(name, category, groupId) {
+  const g = getGroupById(groupId);
+  if (!g) return;
+  g.members = g.members.filter(m => !(m.name === name && m.category === category));
+  // Mirror removal into group's own hierarchy state
+  const gender = getGender(name, category);
+  const gKey   = `${category}::${gender}`;
+  if (g.peopleByGroup[gKey]) {
+    g.peopleByGroup[gKey] = g.peopleByGroup[gKey].filter(n => n !== name);
+    if (g.peopleByGroup[gKey].length === 0) {
+      delete g.peopleByGroup[gKey];
+      g.gendersByCategory[category] = (g.gendersByCategory[category] || []).filter(gen => gen !== gender);
+      if (!g.gendersByCategory[category]?.length) {
+        delete g.gendersByCategory[category];
+        g.catOrder = g.catOrder.filter(c => c !== category);
+      }
+    }
+  }
+}
+
+function removePersonFromAllGroups(name, category) {
+  groups.forEach(g => removePersonFromGroup(name, category, g.id));
+}
+
+// ─── TIER CONFLICT MODAL ───────────────────────────────────────
+function showTierConflictModal(existingGroup, targetGroup) {
+  const eIdx = getGroupIndex(existingGroup.id) + 1;
+  const tIdx = getGroupIndex(targetGroup.id) + 1;
+  document.getElementById('tierModalText').textContent =
+    `Tiers are mutually exclusive. Remove this talent from Tier ${eIdx} to add them to Tier ${tIdx}.`;
+  document.getElementById('tierModalOverlay').classList.add('visible');
+}
+
+// ─── CARD GROUP INDICATORS ─────────────────────────────────────
+function refreshCardGroupIndicators() {
+  document.querySelectorAll('.person-card').forEach(card => {
+    const existing = card.querySelector('.card-group-indicators');
+    if (existing) existing.remove();
+    card.classList.remove('card-in-other-group');
+  });
+
+  if (!groupingMode) return;
+
+  document.querySelectorAll('.person-card').forEach(card => {
+    const name      = card.dataset.name;
+    const category  = card.dataset.category;
+    const pGroups   = getPersonGroups(name, category);
+    if (pGroups.length === 0) return;
+
+    const inOther = pGroups.some(g => g.id !== activeGroupId);
+    if (inOther) card.classList.add('card-in-other-group');
+
+    const indicators = document.createElement('div');
+    indicators.className = 'card-group-indicators';
+    pGroups.forEach(g => {
+      const idx = getGroupIndex(g.id);
+      const dot = document.createElement('span');
+      dot.className = 'card-group-dot';
+      dot.textContent = idx + 1;
+      dot.style.color = groupColor(idx);
+      indicators.appendChild(dot);
+    });
+    card.appendChild(indicators);
+  });
+}
+
+// ─── RENDER GROUPING SECTION ───────────────────────────────────
+function renderGroupingSection() {
+  const modeArea  = document.getElementById('groupingGroupsArea');
+  const groupList = document.getElementById('groupingGroupsList');
+
+  document.getElementById('btnModeTiers').classList.toggle('active', groupingMode === 'tiers');
+  document.getElementById('btnModeCategories').classList.toggle('active', groupingMode === 'categories');
+
+  if (!groupingMode) {
+    modeArea.style.display = 'none';
+    return;
+  }
+
+  modeArea.style.display = 'block';
+  groupList.innerHTML = '';
+
+  const modeLabel = groupingMode === 'tiers' ? 'Tier' : 'Category';
+
+  groups.forEach((group, idx) => {
+    const isActive = group.id === activeGroupId;
+    const color    = groupColor(idx);
+
+    const row = document.createElement('div');
+    row.className = 'group-row' + (isActive ? ' group-row-active' : '');
+
+    const colorDot = document.createElement('span');
+    colorDot.className = 'group-color-dot';
+    colorDot.style.background = color;
+
+    const label = document.createElement('span');
+    label.className = 'group-label';
+    label.textContent = `${modeLabel} ${idx + 1}`;
+    label.style.color = color;
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'group-name-input';
+    input.placeholder = `Enter ${modeLabel} ${idx + 1} name…`;
+    input.value = group.name;
+    input.addEventListener('input', e => {
+      group.name = e.target.value;
+      // Update "+" button in place so typing doesn't lose focus
+      const addBtn = groupList.querySelector('.group-add-btn');
+      if (addBtn) {
+        const allHaveNames = groups.every(g => g.name.trim().length > 0);
+        addBtn.disabled = !allHaveNames;
+        addBtn.title = allHaveNames ? `Add ${modeLabel}` : `Enter a name for each ${modeLabel.toLowerCase()} first`;
+      }
+      renderTray(); // Update tab labels in tray
+    });
+
+    const activateBtn = document.createElement('button');
+    activateBtn.className = 'group-activate-btn' + (isActive ? ' group-activate-btn-active' : '');
+    activateBtn.textContent = isActive ? 'Active' : 'Activate';
+    activateBtn.style.borderColor = color;
+    if (isActive) { activateBtn.style.background = color; activateBtn.style.color = '#fff'; }
+    activateBtn.addEventListener('click', () => setActiveGroup(group.id));
+
+    const removeBtn = document.createElement('button');
+    removeBtn.className = 'group-remove-btn';
+    removeBtn.title = `Remove ${modeLabel} ${idx + 1}`;
+    removeBtn.textContent = '×';
+    removeBtn.addEventListener('click', () => removeGroup(group.id));
+
+    row.appendChild(colorDot);
+    row.appendChild(label);
+    row.appendChild(input);
+    row.appendChild(activateBtn);
+    row.appendChild(removeBtn);
+    groupList.appendChild(row);
+  });
+
+  if (groups.length < 10) {
+    const allHaveNames = groups.every(g => g.name.trim().length > 0);
+    const addBtn = document.createElement('button');
+    addBtn.className = 'group-add-btn';
+    addBtn.textContent = '+';
+    addBtn.disabled = !allHaveNames;
+    addBtn.title = allHaveNames ? `Add ${modeLabel}` : `Enter a name for each ${modeLabel.toLowerCase()} first`;
+    addBtn.addEventListener('click', () => { if (!addBtn.disabled) addGroup(); });
+    groupList.appendChild(addBtn);
+  }
+}
+
+// ─── FULL RESET ────────────────────────────────────────────────
+// Clears all selections, hierarchy, and group state. Does NOT touch groupingMode.
+function _fullReset() {
+  selectedPeople        = [];
+  featuredNames         = [];
+  categoryOrder         = [];
+  genderOrderByCategory = {};
+  peopleOrderByGroup    = {};
+  collapsedCategories   = new Set();
+  collapsedGenders      = new Set();
+  groups                = [];
+  activeGroupId         = null;
+  _nextGroupId          = 1;
+  document.querySelectorAll('.person-card.selected').forEach(c => c.classList.remove('selected'));
+}
+
+// ─── SET GROUPING MODE ─────────────────────────────────────────
+function setGroupingMode(mode) {
+  const togglingOff = groupingMode === mode;
+
+  _fullReset();
+
+  if (togglingOff) {
+    groupingMode = null;
+  } else {
+    groupingMode = mode;
+    // Seed the first group directly (no render chain inside)
+    const id = 'g' + (_nextGroupId++);
+    groups.push(_makeGroup(id));
+    activeGroupId = id;
+  }
+
+  renderGroupingSection();
+  renderTray();
+  refreshCardGroupIndicators();
+  updateGenerateBtn();
+}
+
+// ─── GROUP FACTORY ─────────────────────────────────────────────
+function _makeGroup(id) {
+  return {
+    id,
+    name: '',
+    members: [],
+    catOrder: [],
+    gendersByCategory: {},
+    peopleByGroup: {},
+    collapsedCats: new Set(),
+    collapsedGens: new Set()
+  };
+}
+
+// ─── ACTIVE HIERARCHY ACCESSORS ────────────────────────────────
+// Route hierarchy reads to the active group when grouping is on,
+// or to the global state when not.
+function _activeCatOrder() {
+  return groupingMode && activeGroupId ? (getGroupById(activeGroupId)?.catOrder || []) : categoryOrder;
+}
+function _activeGendersByCategory() {
+  return groupingMode && activeGroupId ? (getGroupById(activeGroupId)?.gendersByCategory || {}) : genderOrderByCategory;
+}
+function _activePeopleByGroup() {
+  return groupingMode && activeGroupId ? (getGroupById(activeGroupId)?.peopleByGroup || {}) : peopleOrderByGroup;
+}
+function _isCatCollapsed(cat) {
+  const s = groupingMode && activeGroupId ? getGroupById(activeGroupId)?.collapsedCats : collapsedCategories;
+  return s ? s.has(cat) : false;
+}
+function _isGenCollapsed(key) {
+  const s = groupingMode && activeGroupId ? getGroupById(activeGroupId)?.collapsedGens : collapsedGenders;
+  return s ? s.has(key) : false;
+}
+function _toggleCatCollapse(cat) {
+  const s = groupingMode && activeGroupId ? getGroupById(activeGroupId)?.collapsedCats : collapsedCategories;
+  if (!s) return;
+  s.has(cat) ? s.delete(cat) : s.add(cat);
+}
+function _toggleGenCollapse(key) {
+  const s = groupingMode && activeGroupId ? getGroupById(activeGroupId)?.collapsedGens : collapsedGenders;
+  if (!s) return;
+  s.has(key) ? s.delete(key) : s.add(key);
+}
+
+// ─── ADD GROUP ─────────────────────────────────────────────────
+function addGroup() {
+  if (groups.length >= 10) return;
+  const id = 'g' + (_nextGroupId++);
+  groups.push(_makeGroup(id));
+  if (!activeGroupId) activeGroupId = id;
+  renderGroupingSection();
+  // No tray re-render needed — empty group doesn't change tray content
+}
+
+// ─── REMOVE GROUP ──────────────────────────────────────────────
+function removeGroup(id) {
+  const idx = getGroupIndex(id);
+  if (idx === -1) return;
+  groups.splice(idx, 1);
+  // If we removed the active group, switch to nearest remaining group
+  if (activeGroupId === id) {
+    activeGroupId = groups.length > 0 ? groups[Math.min(idx, groups.length - 1)].id : null;
+  }
+  renderGroupingSection();
+  renderTray();
+  refreshCardGroupIndicators();
+}
+
+// ─── SET ACTIVE GROUP ──────────────────────────────────────────
+function setActiveGroup(id) {
+  activeGroupId = id;
+  renderGroupingSection();
+  renderTray();
+}
+
 // ─── TOGGLE PERSON ─────────────────────────────────────────────
 function togglePerson(name, category, card) {
+  if (groupingMode && activeGroupId) {
+    const activeGroup   = getGroupById(activeGroupId);
+    const pGroups       = getPersonGroups(name, category);
+    const inActiveGroup = pGroups.some(g => g.id === activeGroupId);
+
+    if (inActiveGroup) {
+      // Remove from active group
+      removePersonFromGroup(name, category, activeGroupId);
+      // If no longer in any group, also remove from selectedPeople
+      if (getPersonGroups(name, category).length === 0) {
+        const idx = selectedPeople.findIndex(p => p.name === name && p.category === category);
+        if (idx !== -1) {
+          selectedPeople.splice(idx, 1);
+          featuredNames = featuredNames.filter(f => !(f.name === name && f.category === category));
+          removeFromHierarchy(name, category);
+        }
+        card.classList.remove('selected');
+      }
+    } else {
+      // Tier conflict check
+      if (groupingMode === 'tiers' && pGroups.length > 0) {
+        showTierConflictModal(pGroups[0], activeGroup);
+        return;
+      }
+      // Add to selectedPeople if not already there
+      if (!selectedPeople.some(p => p.name === name && p.category === category)) {
+        selectedPeople.push({ name, category });
+        card.classList.add('selected');
+        addToHierarchy(name, category);
+      }
+      addPersonToGroup(name, category, activeGroupId);
+    }
+
+    refreshCardGroupIndicators();
+    renderTray();
+    updateGenerateBtn();
+    return;
+  }
+
+  // No grouping mode — original behavior
   const idx = selectedPeople.findIndex(p => p.name === name && p.category === category);
   if (idx !== -1) {
     selectedPeople.splice(idx, 1);
@@ -472,7 +817,16 @@ function clearAll() {
   peopleOrderByGroup    = {};
   collapsedCategories   = new Set();
   collapsedGenders      = new Set();
+  groups.forEach(g => {
+    g.members          = [];
+    g.catOrder         = [];
+    g.gendersByCategory = {};
+    g.peopleByGroup    = {};
+    g.collapsedCats    = new Set();
+    g.collapsedGens    = new Set();
+  });
   document.querySelectorAll('.person-card.selected').forEach(card => card.classList.remove('selected'));
+  refreshCardGroupIndicators();
   renderTray();
   updateGenerateBtn();
 }
@@ -481,22 +835,47 @@ clearAllBtn.addEventListener('click', clearAll);
 
 // ─── RENDER TRAY ───────────────────────────────────────────────
 function renderTray() {
-  tray.querySelectorAll('.featured-order-section, .selected-list').forEach(el => el.remove());
+  tray.querySelectorAll('.tray-group-tabs, .featured-order-section, .selected-list').forEach(el => el.remove());
 
-  const total = selectedPeople.length;
+  // ── Group tabs (always shown at top when grouping is active) ──
+  if (groupingMode && groups.length > 0) {
+    const modeLabel = groupingMode === 'tiers' ? 'Tier' : 'Category';
+    const tabsEl = document.createElement('div');
+    tabsEl.className = 'tray-group-tabs';
+    groups.forEach((group, idx) => {
+      const isActive    = group.id === activeGroupId;
+      const color       = groupColor(idx);
+      const displayName = group.name.trim() || `${modeLabel} ${idx + 1}`;
+      const tab = document.createElement('button');
+      tab.className = 'tray-group-tab' + (isActive ? ' tray-group-tab-active' : '');
+      tab.style.borderColor = color;
+      tab.style.color = isActive ? '#fff' : color;
+      if (isActive) tab.style.background = color;
+      tab.textContent = displayName;
+      tab.addEventListener('click', () => setActiveGroup(group.id));
+      tabsEl.appendChild(tab);
+    });
+    tray.insertBefore(tabsEl, trayEmpty);
+  }
 
-  if (total === 0) {
+  // ── Determine what to show ─────────────────────────────────────
+  const activeGroup = groupingMode ? getGroupById(activeGroupId) : null;
+  const viewCount   = groupingMode ? (activeGroup?.members.length || 0) : selectedPeople.length;
+
+  if (viewCount === 0) {
     trayEmpty.style.display = '';
+    trayEmpty.textContent   = groupingMode ? 'No talent in this group yet' : 'No talent selected yet';
     selectionCount.textContent = '';
-    clearAllBtn.style.display = 'none';
+    clearAllBtn.style.display  = 'none';
+    refreshCardGroupIndicators();
     return;
   }
 
-  trayEmpty.style.display = 'none';
-  selectionCount.textContent = `— ${total} selected`;
-  clearAllBtn.style.display = 'block';
+  trayEmpty.style.display    = 'none';
+  selectionCount.textContent = `— ${viewCount} selected`;
+  clearAllBtn.style.display  = 'block';
 
-  // ── Featured Order section ────────────────────────────────────
+  // ── Featured Order section ─────────────────────────────────────
   if (featuredNames.length > 0) {
     const featSection = document.createElement('div');
     featSection.className = 'featured-order-section';
@@ -557,17 +936,21 @@ function renderTray() {
     tray.appendChild(featSection);
   }
 
-  // ── Three-level hierarchy ───────────────────────────────────
+  // ── Three-level hierarchy (routes to active group's state) ───
+  const activeCats    = _activeCatOrder();
+  const activeGenders = _activeGendersByCategory();
+  const activePeople  = _activePeopleByGroup();
+
   const list = document.createElement('div');
   list.className = 'selected-list';
 
-  categoryOrder.forEach(cat => {
-    const genders      = genderOrderByCategory[cat] || [];
-    const catTotal     = genders.reduce((sum, g) => sum + (peopleOrderByGroup[`${cat}::${g}`]?.length || 0), 0);
-    const catCollapsed = collapsedCategories.has(cat);
-    const multiCat     = categoryOrder.length > 1;
+  activeCats.forEach(cat => {
+    const genders      = activeGenders[cat] || [];
+    const catTotal     = genders.reduce((sum, g) => sum + (activePeople[`${cat}::${g}`]?.length || 0), 0);
+    const catCollapsed = _isCatCollapsed(cat);
+    const multiCat     = activeCats.length > 1;
 
-    // ── Category block ──────────────────────────────────────
+    // ── Category block ────────────────────────────────────────
     const catBlock = document.createElement('div');
     catBlock.className = 'tray-cat-block';
     catBlock.dataset.category = cat;
@@ -586,7 +969,7 @@ function renderTray() {
     catToggle.textContent = catCollapsed ? '▶' : '▼';
     catToggle.addEventListener('click', e => {
       e.stopPropagation();
-      collapsedCategories.has(cat) ? collapsedCategories.delete(cat) : collapsedCategories.add(cat);
+      _toggleCatCollapse(cat);
       renderTray();
     });
 
@@ -610,11 +993,11 @@ function renderTray() {
 
       genders.forEach(gender => {
         const groupKey        = `${cat}::${gender}`;
-        const people          = peopleOrderByGroup[groupKey] || [];
-        const genderCollapsed = collapsedGenders.has(groupKey);
+        const people          = activePeople[groupKey] || [];
+        const genderCollapsed = _isGenCollapsed(groupKey);
         const multiGender     = genders.length > 1;
 
-        // ── Gender block ──────────────────────────────────
+        // ── Gender block ────────────────────────────────────
         const genderBlock = document.createElement('div');
         genderBlock.className = 'tray-gender-block';
         genderBlock.dataset.gender = gender;
@@ -633,7 +1016,7 @@ function renderTray() {
         gToggle.textContent = genderCollapsed ? '▶' : '▼';
         gToggle.addEventListener('click', e => {
           e.stopPropagation();
-          collapsedGenders.has(groupKey) ? collapsedGenders.delete(groupKey) : collapsedGenders.add(groupKey);
+          _toggleGenCollapse(groupKey);
           renderTray();
         });
 
@@ -656,10 +1039,10 @@ function renderTray() {
           genderBody.className = 'tray-gender-body';
 
           people.forEach(name => {
-            const isFeatured = featuredNames.some(f => f.name === name && f.category === cat);
+            const isFeatured  = featuredNames.some(f => f.name === name && f.category === cat);
             const multiPeople = people.length > 1;
 
-            // ── Person row ──────────────────────────────
+            // ── Person row ────────────────────────────────
             const row = document.createElement('div');
             row.className = 'selected-row' + (isFeatured ? ' is-featured' : '');
             row.dataset.name     = name;
@@ -673,6 +1056,7 @@ function renderTray() {
 
             const starBtn = document.createElement('button');
             starBtn.className = 'featured-star-btn';
+            starBtn.style.visibility = '';
             starBtn.title = isFeatured ? 'Remove from Featured' : 'Mark as Featured';
             starBtn.textContent = isFeatured ? '★' : '☆';
             starBtn.addEventListener('click', () => {
@@ -692,7 +1076,20 @@ function renderTray() {
             removeBtn.className = 'selected-row-remove';
             removeBtn.title = 'Remove';
             removeBtn.textContent = '×';
-            removeBtn.addEventListener('click', () => removePerson(name, cat));
+            removeBtn.addEventListener('click', () => {
+              if (groupingMode) {
+                // Remove from active group only; deselect entirely if last group
+                removePersonFromGroup(name, cat, activeGroupId);
+                if (getPersonGroups(name, cat).length === 0) {
+                  removePerson(name, cat);
+                } else {
+                  refreshCardGroupIndicators();
+                  renderTray();
+                }
+              } else {
+                removePerson(name, cat);
+              }
+            });
 
             row.appendChild(pHandle);
             row.appendChild(starBtn);
@@ -718,6 +1115,7 @@ function renderTray() {
   });
 
   tray.appendChild(list);
+  refreshCardGroupIndicators();
 }
 
 // ─── REMOVE PERSON ─────────────────────────────────────────────
@@ -725,10 +1123,12 @@ function removePerson(name, category) {
   selectedPeople = selectedPeople.filter(p => !(p.name === name && p.category === category));
   featuredNames  = featuredNames.filter(f => !(f.name === name && f.category === category));
   removeFromHierarchy(name, category);
+  removePersonFromAllGroups(name, category);
 
   const card = document.querySelector(`.person-card[data-name="${CSS.escape(name)}"][data-category="${CSS.escape(category)}"]`);
   if (card) card.classList.remove('selected');
 
+  refreshCardGroupIndicators();
   renderTray();
   updateGenerateBtn();
 }
@@ -776,10 +1176,29 @@ generateBtn.addEventListener('click', async () => {
   }, 1000);
 
   try {
+    const modeLabel = groupingMode === 'tiers' ? 'Tier' : 'Category';
+    // Build ordered members from each group's drag-ordered hierarchy
+    function groupOrderedMembers(g) {
+      const out = [];
+      for (const cat of g.catOrder) {
+        for (const gender of (g.gendersByCategory[cat] || [])) {
+          for (const name of (g.peopleByGroup[`${cat}::${gender}`] || [])) {
+            out.push({ name, category: cat });
+          }
+        }
+      }
+      return out;
+    }
     const payload = encodeURIComponent(JSON.stringify({
       title,
       featuredNames,
-      allSelections: getOrderedSelections()
+      allSelections: getOrderedSelections(),
+      groupingMode: groupingMode || null,
+      groups: groupingMode ? groups.map((g, idx) => ({
+        index: idx,
+        name: g.name.trim() || `${modeLabel} ${idx + 1}`,
+        members: groupOrderedMembers(g)
+      })) : null
     }));
     const data = await jsonp(`${APPS_SCRIPT_URL}?action=generateDocument&payload=${payload}`);
 
@@ -814,6 +1233,15 @@ function updateFooterCount() {
 // ─── INIT ──────────────────────────────────────────────────────
 function initApp() {
   fetchRoster();
+
+  document.getElementById('btnModeTiers').addEventListener('click', () => setGroupingMode('tiers'));
+  document.getElementById('btnModeCategories').addEventListener('click', () => setGroupingMode('categories'));
+  document.getElementById('tierModalDismiss').addEventListener('click', () => {
+    document.getElementById('tierModalOverlay').classList.remove('visible');
+  });
+  document.getElementById('tierModalOverlay').addEventListener('click', e => {
+    if (e.target === e.currentTarget) e.currentTarget.classList.remove('visible');
+  });
 }
 
 initGate();

@@ -47,7 +47,9 @@ function doGet(e) {
     result = generateDocument(
       payload.title,
       payload.featuredNames  || [],
-      payload.allSelections  || []
+      payload.allSelections  || [],
+      payload.groupingMode   || null,
+      payload.groups         || null
     );
   } else {
     result = { status: "Bio Builder is running." };
@@ -73,7 +75,9 @@ function doPost(e) {
     const result  = generateDocument(
       payload.title,
       payload.featuredNames || [],
-      payload.allSelections || []
+      payload.allSelections || [],
+      payload.groupingMode  || null,
+      payload.groups        || null
     );
     return respond(result);
   } catch (err) {
@@ -148,7 +152,7 @@ const BRAND_COLOR  = '#003e02';
 //   5. A blank line separates gender groups within a category.
 //   6. A blank line separates categories.
 // ============================================================
-function generateDocument(docTitle, featuredNames, allSelections) {
+function generateDocument(docTitle, featuredNames, allSelections, groupingMode, groups) {
   try {
     const ss = SpreadsheetApp.openById(SHEET_ID);
 
@@ -257,9 +261,10 @@ function generateDocument(docTitle, featuredNames, allSelections) {
     // ═════════════════════════════════════════════════════════════════════════
     if (featuredNames.length > 0) {
       const featHeader = body.appendParagraph('Featured Talent');
+      featHeader.setHeading(DocumentApp.ParagraphHeading.HEADING1);
       featHeader.setSpacingBefore(0).setSpacingAfter(0);
       featHeader.editAsText()
-        .setFontFamily('Arial').setFontSize(11).setBold(true).setUnderline(true)
+        .setFontFamily('Arial').setFontSize(11).setBold(true).setUnderline(false)
         .setForegroundColor('#1A1A1A');
 
       featuredNames.forEach(f => {
@@ -275,99 +280,132 @@ function generateDocument(docTitle, featuredNames, allSelections) {
     }
 
     // ═════════════════════════════════════════════════════════════════════════
-    // CATEGORY sections
+    // Helper: write a bio paragraph with rich-text formatting
     // ═════════════════════════════════════════════════════════════════════════
-    let isFirstCategory = true;
+    function writeBio(key) {
+      const person = dataMap[key];
+      if (!person?.bio) return;
 
-    orderedCategories.forEach(tabName => {
-      const genders = orderedGendersByCategory[tabName] || [];
+      const bioPara = body.appendParagraph(person.bio);
+      bioPara.setSpacingBefore(0).setSpacingAfter(0);
+      bioPara.editAsText()
+        .setFontFamily('Arial').setFontSize(11).setBold(false)
+        .setForegroundColor('#333333');
 
-      // Skip this category if nobody has a bio
-      const hasAnyone = genders.some(gender =>
-        (selectionsByGroup[`${tabName}::${gender}`] || []).some(s => dataMap[`${tabName}::${s.name}`]?.bio)
-      );
-      if (!hasAnyone) return;
-
-      // Blank line before each category except the first
-      if (!isFirstCategory) {
-        body.appendParagraph('').setSpacingBefore(0).setSpacingAfter(0);
+      const richText = richTextMap[key];
+      if (richText) {
+        const textEl     = bioPara.editAsText();
+        const contentLen = textEl.getText().length;
+        let pos = 0;
+        for (const run of richText.getRuns()) {
+          const runLen = run.getText().length;
+          if (runLen === 0) continue;
+          if (pos >= contentLen) break;
+          const endPos = Math.min(pos + runLen - 1, contentLen - 1);
+          const url    = run.getLinkUrl();
+          const style  = run.getTextStyle();
+          if (url) { try { textEl.setLinkUrl(pos, endPos, url); } catch (_) {} }
+          if (style.isBold()      !== null) textEl.setBold(pos,      endPos, style.isBold());
+          if (style.isItalic()    !== null) textEl.setItalic(pos,    endPos, style.isItalic());
+          if (style.isUnderline() !== null) textEl.setUnderline(pos, endPos, style.isUnderline());
+          pos += runLen;
+        }
       }
-      isFirstCategory = false;
+    }
 
-      // Category label
-      const catLabel = body.appendParagraph(tabName);
-      catLabel.setSpacingBefore(0).setSpacingAfter(0);
-      catLabel.editAsText()
-        .setFontFamily('Arial').setFontSize(11).setBold(true).setForegroundColor('#1A1A1A');
+    // ═════════════════════════════════════════════════════════════════════════
+    // GROUP-BASED sections (Tiers / Categories)
+    // ═════════════════════════════════════════════════════════════════════════
+    if (groupingMode && groups && groups.length > 0) {
+      let isFirstGroup = true;
 
-      // Gender groups in manual order
-      let isFirstGenderGroup = true;
-
-      genders.forEach(gender => {
-        const groupSelections = (selectionsByGroup[`${tabName}::${gender}`] || []);
-
-        // Within each group: featured names first (by their featuredNames index),
-        // then everyone else in the original manual order. JS sort is stable so
-        // non-featured people retain their relative allSelections order.
-        const people = groupSelections
-          .slice()
+      groups.forEach(group => {
+        const membersWithBio = (group.members || [])
+          .filter(m => dataMap[`${m.category}::${m.name}`]?.bio)
           .sort((a, b) => {
-            const aFeat = featuredKeyOrder[`${tabName}::${a.name}`] !== undefined
-              ? featuredKeyOrder[`${tabName}::${a.name}`] : Infinity;
-            const bFeat = featuredKeyOrder[`${tabName}::${b.name}`] !== undefined
-              ? featuredKeyOrder[`${tabName}::${b.name}`] : Infinity;
+            const aFeat = featuredKeyOrder[`${a.category}::${a.name}`] !== undefined
+              ? featuredKeyOrder[`${a.category}::${a.name}`] : Infinity;
+            const bFeat = featuredKeyOrder[`${b.category}::${b.name}`] !== undefined
+              ? featuredKeyOrder[`${b.category}::${b.name}`] : Infinity;
             return aFeat - bFeat;
-          })
-          .filter(s => dataMap[`${tabName}::${s.name}`]?.bio);
+          });
+        if (membersWithBio.length === 0) return;
 
-        if (people.length === 0) return;
-
-        // Blank line before second+ gender group within this category
-        if (!isFirstGenderGroup) {
+        // Double blank line between groups (single blank line after the first)
+        if (!isFirstGroup) {
+          body.appendParagraph('').setSpacingBefore(0).setSpacingAfter(0);
           body.appendParagraph('').setSpacingBefore(0).setSpacingAfter(0);
         }
-        isFirstGenderGroup = false;
+        isFirstGroup = false;
 
-        people.forEach(s => {
-          const key    = `${tabName}::${s.name}`;
-          const person = dataMap[key];
-          if (!person?.bio) return;
+        // Group label — Heading 1 so it appears in the doc navigation sidebar
+        const groupLabel = body.appendParagraph(group.name);
+        groupLabel.setHeading(DocumentApp.ParagraphHeading.HEADING1);
+        groupLabel.setSpacingBefore(0).setSpacingAfter(0);
+        groupLabel.editAsText()
+          .setFontFamily('Arial').setFontSize(11).setBold(true).setUnderline(false)
+          .setForegroundColor('#1A1A1A');
 
-          const bioPara = body.appendParagraph(person.bio);
-          bioPara.setSpacingBefore(0).setSpacingAfter(0);
-          bioPara.editAsText()
-            .setFontFamily('Arial').setFontSize(11).setBold(false)
-            .setForegroundColor('#333333');
-
-          // Re-apply rich-text formatting (links, bold, italic, underline)
-          const richText = richTextMap[key];
-          if (richText) {
-            const textEl    = bioPara.editAsText();
-            const contentLen = textEl.getText().length;
-            let pos = 0;
-            for (const run of richText.getRuns()) {
-              const runText = run.getText();
-              const runLen  = runText.length;
-              if (runLen === 0) continue;
-              if (pos >= contentLen) break;
-
-              const endPos = Math.min(pos + runLen - 1, contentLen - 1);
-              const url   = run.getLinkUrl();
-              const style = run.getTextStyle();
-
-              if (url) {
-                try { textEl.setLinkUrl(pos, endPos, url); } catch (_) {}
-              }
-              if (style.isBold()      !== null) textEl.setBold(pos,      endPos, style.isBold());
-              if (style.isItalic()    !== null) textEl.setItalic(pos,    endPos, style.isItalic());
-              if (style.isUnderline() !== null) textEl.setUnderline(pos, endPos, style.isUnderline());
-
-              pos += runLen;
-            }
+        // Bios separated by a blank line within the group
+        let isFirstMember = true;
+        membersWithBio.forEach(m => {
+          if (!isFirstMember) {
+            body.appendParagraph('').setSpacingBefore(0).setSpacingAfter(0);
           }
+          isFirstMember = false;
+          writeBio(`${m.category}::${m.name}`);
         });
       });
-    });
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // STANDARD category sections (no grouping)
+    // ═════════════════════════════════════════════════════════════════════════
+    } else {
+      let isFirstCategory = true;
+
+      orderedCategories.forEach(tabName => {
+        const genders = orderedGendersByCategory[tabName] || [];
+
+        const hasAnyone = genders.some(gender =>
+          (selectionsByGroup[`${tabName}::${gender}`] || []).some(s => dataMap[`${tabName}::${s.name}`]?.bio)
+        );
+        if (!hasAnyone) return;
+
+        if (!isFirstCategory) {
+          body.appendParagraph('').setSpacingBefore(0).setSpacingAfter(0);
+        }
+        isFirstCategory = false;
+
+        const catLabel = body.appendParagraph(tabName);
+        catLabel.setSpacingBefore(0).setSpacingAfter(0);
+        catLabel.editAsText()
+          .setFontFamily('Arial').setFontSize(11).setBold(true).setForegroundColor('#1A1A1A');
+
+        let isFirstGenderGroup = true;
+
+        genders.forEach(gender => {
+          const people = (selectionsByGroup[`${tabName}::${gender}`] || [])
+            .slice()
+            .sort((a, b) => {
+              const aFeat = featuredKeyOrder[`${tabName}::${a.name}`] !== undefined
+                ? featuredKeyOrder[`${tabName}::${a.name}`] : Infinity;
+              const bFeat = featuredKeyOrder[`${tabName}::${b.name}`] !== undefined
+                ? featuredKeyOrder[`${tabName}::${b.name}`] : Infinity;
+              return aFeat - bFeat;
+            })
+            .filter(s => dataMap[`${tabName}::${s.name}`]?.bio);
+
+          if (people.length === 0) return;
+
+          if (!isFirstGenderGroup) {
+            body.appendParagraph('').setSpacingBefore(0).setSpacingAfter(0);
+          }
+          isFirstGenderGroup = false;
+
+          people.forEach(s => writeBio(`${tabName}::${s.name}`));
+        });
+      });
+    }
 
     // ═════════════════════════════════════════════════════════════════════════
     // FOOTER — "Confidential" left | small logo right

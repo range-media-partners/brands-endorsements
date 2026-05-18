@@ -1186,6 +1186,288 @@ footer {
   to { opacity: 1; }
 }
 
+/* ─── GROUPING SECTION ──────────────────────────────────────── */
+.grouping-section {
+  margin-bottom: 32px;
+  padding-bottom: 32px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.grouping-use-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.grouping-use-label {
+  font-family: 'DM Mono', monospace;
+  font-size: 9px;
+  font-weight: 500;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+  flex-shrink: 0;
+}
+
+.grouping-mode-btn {
+  font-family: 'DM Mono', monospace;
+  font-size: 9px;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  padding: 6px 14px;
+  border: 1px solid var(--rule);
+  background: transparent;
+  color: var(--ink-muted);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.grouping-mode-btn:hover {
+  border-color: var(--gold-dim);
+  color: var(--ink);
+}
+
+.grouping-mode-btn.active {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--cream);
+}
+
+.grouping-groups-area {
+  margin-top: 20px;
+}
+
+.grouping-groups-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.group-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border: 1px solid var(--rule);
+  background: var(--card-bg);
+  transition: border-color 0.15s;
+}
+
+.group-row-active {
+  border-color: var(--gold-light);
+}
+
+.group-color-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.group-label {
+  font-family: 'DM Mono', monospace;
+  font-size: 9px;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  font-weight: 500;
+  flex-shrink: 0;
+  min-width: 64px;
+}
+
+.group-name-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--rule);
+  padding: 4px 0;
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 16px;
+  font-weight: 300;
+  color: var(--ink);
+  outline: none;
+  transition: border-color 0.15s;
+  letter-spacing: 0.01em;
+}
+
+.group-name-input::placeholder {
+  color: var(--rule);
+  font-style: italic;
+}
+
+.group-name-input:focus {
+  border-bottom-color: var(--gold);
+}
+
+.group-activate-btn {
+  font-family: 'DM Mono', monospace;
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 5px 12px;
+  border: 1px solid var(--rule);
+  background: transparent;
+  color: var(--ink-muted);
+  cursor: pointer;
+  transition: all 0.15s;
+  flex-shrink: 0;
+}
+
+.group-activate-btn:hover {
+  color: var(--ink);
+}
+
+.group-activate-btn-active {
+  color: #fff !important;
+}
+
+.group-remove-btn {
+  background: none;
+  border: none;
+  color: var(--ink-muted);
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  padding: 0 4px;
+  transition: color 0.1s;
+  flex-shrink: 0;
+}
+
+.group-remove-btn:hover { color: #8B3A3A; }
+
+.group-add-btn {
+  align-self: flex-start;
+  font-family: 'DM Mono', monospace;
+  font-size: 14px;
+  font-weight: 500;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--rule);
+  background: transparent;
+  color: var(--ink-muted);
+  cursor: pointer;
+  transition: all 0.15s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 2px;
+}
+
+.group-add-btn:hover:not(:disabled) {
+  border-color: var(--gold-dim);
+  color: var(--ink);
+}
+
+.group-add-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+/* ─── CARD GROUP INDICATORS ─────────────────────────────────── */
+.card-in-other-group {
+  background: color-mix(in srgb, var(--card-bg) 85%, #b0b0ff 15%) !important;
+}
+
+.card-group-indicators {
+  position: absolute;
+  bottom: 6px;
+  right: 8px;
+  display: flex;
+  gap: 3px;
+  align-items: center;
+}
+
+.card-group-dot {
+  font-family: 'DM Mono', monospace;
+  font-size: 9px;
+  font-weight: 500;
+  line-height: 1;
+}
+
+/* ─── TRAY GROUP TABS ───────────────────────────────────────── */
+.tray-group-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--rule);
+  margin-bottom: 8px;
+}
+
+.tray-group-tab {
+  font-family: 'DM Mono', monospace;
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 7px 14px;
+  border: none;
+  border-right: 1px solid var(--rule);
+  background: transparent;
+  cursor: pointer;
+  transition: all 0.15s;
+  font-weight: 500;
+}
+
+.tray-group-tab:last-child {
+  border-right: none;
+}
+
+.tray-group-tab:hover { opacity: 0.8; }
+
+.tray-group-tab-active { font-weight: 500; }
+
+/* ─── TIER CONFLICT MODAL ───────────────────────────────────── */
+.tier-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 62, 2, 0.35);
+  z-index: 500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s;
+}
+
+.tier-modal-overlay.visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.tier-modal {
+  background: var(--cream);
+  border: 1px solid var(--rule);
+  padding: 28px 32px;
+  max-width: 360px;
+  width: 90%;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  box-shadow: 0 8px 40px rgba(0, 62, 2, 0.15);
+}
+
+.tier-modal-text {
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 18px;
+  font-weight: 300;
+  color: var(--ink);
+  line-height: 1.5;
+}
+
+.tier-modal-btn {
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  padding: 10px 28px;
+  background: var(--ink);
+  color: var(--cream);
+  border: none;
+  cursor: pointer;
+  align-self: flex-end;
+  transition: background 0.15s;
+}
+
+.tier-modal-btn:hover { background: var(--gold-dim); }
+
 /* ─── RESPONSIVE ────────────────────────────────────────────── */
 @media (max-width: 600px) {
   .page { padding: 0 20px 60px; }
