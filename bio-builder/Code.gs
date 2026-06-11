@@ -15,14 +15,13 @@ const TABS = ["Film/TV", "Musician", "Digital", "Sports", "Culinary"];
 // The column names in the Sheet (zero-indexed)
 // NOTE: GENDER column sits between NAME and BIOS
 const COL = {
-  RANGE_ID: 0,
-  NAME: 1,
-  GENDER: 2,
-  BIOS: 3,
-  EXCLUSIVITY: 4,
-  EXCLUSIVITY_SUMMARY: 5,
-  RATE_CARDS: 6,
-  NOTES: 7
+  NAME: 0,
+  GENDER: 1,
+  BIOS: 2,
+  EXCLUSIVITY: 3,
+  EXCLUSIVITY_SUMMARY: 4,
+  RATE_CARDS: 5,
+  NOTES: 6
 };
 
 // respond helper function
