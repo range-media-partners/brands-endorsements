@@ -50,7 +50,8 @@ function doGet(e) {
         payload.featuredNames  || [],
         payload.allSelections  || [],
         payload.groupingMode   || null,
-        payload.groups         || null
+        payload.groups         || null,
+        payload.contextMap     || {}
       );
     } else {
       result = { status: "Bio Builder is running." };
@@ -81,7 +82,8 @@ function doPost(e) {
       payload.featuredNames || [],
       payload.allSelections || [],
       payload.groupingMode  || null,
-      payload.groups        || null
+      payload.groups        || null,
+      payload.contextMap    || {}
     );
     return respond(result);
   } catch (err) {
@@ -143,6 +145,7 @@ const BRAND_COLOR  = '#003e02';
 //
 // featuredNames: [{ name, category }, ...] in user-defined priority order
 // allSelections: [{ name, category }, ...] all selected talent
+// contextMap:    { 'category::name': 'short context string', ... }
 //
 // Document order rules:
 //   1. "Featured Talent" section: featured names listed in star priority order.
@@ -156,9 +159,10 @@ const BRAND_COLOR  = '#003e02';
 //   5. A blank line separates gender groups within a category.
 //   6. A blank line separates categories.
 // ============================================================
-function generateDocument(docTitle, featuredNames, allSelections, groupingMode, groups) {
+function generateDocument(docTitle, featuredNames, allSelections, groupingMode, groups, contextMap) {
   try {
     const ss = SpreadsheetApp.openById(SHEET_ID);
+    contextMap = contextMap || {};
 
     // ── Build data map keyed by `${category}::${name}` ──────────────────────
     const dataMap     = {};
@@ -296,35 +300,78 @@ function generateDocument(docTitle, featuredNames, allSelections, groupingMode, 
     }
 
     // ═════════════════════════════════════════════════════════════════════════
-    // Helper: write a bio paragraph with rich-text formatting
+    // Helper: write a bio paragraph with rich-text formatting.
+    // If context is provided for this person, it's inserted right after the
+    // bio's opening parenthesis, bolded and in green (#0c882b) — e.g.
+    // "NAME (He likes sandwiches. <rest of bio>)".
     // ═════════════════════════════════════════════════════════════════════════
     function writeBio(key) {
       const person = dataMap[key];
       if (!person?.bio) return;
 
-      const bioPara = body.appendParagraph(person.bio);
+      const originalBio = person.bio;
+      const contextRaw   = (contextMap[key] || '').toString().trim();
+      const parenIdx     = originalBio.indexOf('(');
+
+      let insertPoint = -1;
+      let ctxText     = '';
+      let insertion   = '';
+      if (contextRaw && parenIdx !== -1) {
+        ctxText = /[.!?]$/.test(contextRaw) ? contextRaw : `${contextRaw}.`;
+        insertion   = `${ctxText} `;
+        insertPoint = parenIdx + 1;
+      }
+
+      const fullText = insertPoint === -1
+        ? originalBio
+        : originalBio.slice(0, insertPoint) + insertion + originalBio.slice(insertPoint);
+
+      const bioPara = body.appendParagraph(fullText);
       bioPara.setSpacingBefore(0).setSpacingAfter(0);
-      bioPara.editAsText()
-        .setFontFamily('Arial').setFontSize(11).setBold(false)
+      const textEl = bioPara.editAsText();
+      textEl.setFontFamily('Arial').setFontSize(11).setBold(false)
         .setForegroundColor('#333333');
+
+      if (insertPoint !== -1) {
+        const ctxStart = insertPoint;
+        const ctxEnd   = insertPoint + ctxText.length - 1;
+        textEl.setBold(ctxStart, ctxEnd, true).setForegroundColor(ctxStart, ctxEnd, '#0c882b');
+      }
 
       const richText = richTextMap[key];
       if (richText) {
-        const textEl     = bioPara.editAsText();
-        const contentLen = textEl.getText().length;
+        const contentLen = originalBio.length;
         let pos = 0;
         for (const run of richText.getRuns()) {
           const runLen = run.getText().length;
           if (runLen === 0) continue;
           if (pos >= contentLen) break;
-          const endPos = Math.min(pos + runLen - 1, contentLen - 1);
-          const url    = run.getLinkUrl();
-          const style  = run.getTextStyle();
-          if (url) { try { textEl.setLinkUrl(pos, endPos, url); } catch (_) {} }
-          if (style.isBold()      !== null) textEl.setBold(pos,      endPos, style.isBold());
-          if (style.isItalic()    !== null) textEl.setItalic(pos,    endPos, style.isItalic());
-          if (style.isUnderline() !== null) textEl.setUnderline(pos, endPos, style.isUnderline());
+          const origStart = pos;
+          const origEnd   = Math.min(pos + runLen - 1, contentLen - 1);
           pos += runLen;
+
+          const url   = run.getLinkUrl();
+          const style = run.getTextStyle();
+
+          // Shift/split the run's range around the inserted context text so
+          // styling still lands on the correct characters of the new text.
+          const segments = [];
+          if (insertPoint === -1 || origEnd < insertPoint) {
+            segments.push([origStart, origEnd]);
+          } else if (origStart >= insertPoint) {
+            segments.push([origStart + insertion.length, origEnd + insertion.length]);
+          } else {
+            segments.push([origStart, insertPoint - 1]);
+            segments.push([insertPoint + insertion.length, origEnd + insertion.length]);
+          }
+
+          segments.forEach(([s, e]) => {
+            if (s > e) return;
+            if (url) { try { textEl.setLinkUrl(s, e, url); } catch (_) {} }
+            if (style.isBold()      !== null) textEl.setBold(s,      e, style.isBold());
+            if (style.isItalic()    !== null) textEl.setItalic(s,    e, style.isItalic());
+            if (style.isUnderline() !== null) textEl.setUnderline(s, e, style.isUnderline());
+          });
         }
       }
     }

@@ -846,7 +846,33 @@ h1 em {
   font-family: 'Cormorant Garamond', serif;
   font-size: 16px;
   color: var(--ink);
+  flex: 0 1 auto;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.selected-row-context {
   flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  border-bottom: 1px dashed var(--rule);
+  padding: 3px 4px;
+  font-family: 'Cormorant Garamond', serif;
+  font-style: italic;
+  font-size: 13px;
+  color: var(--ink-soft);
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.selected-row-context::placeholder { color: var(--ink-muted); opacity: 0.6; }
+
+.selected-row-context:focus {
+  border-bottom-color: var(--gold);
+  border-bottom-style: solid;
 }
 
 .selected-row-category {
@@ -1467,6 +1493,71 @@ footer {
 }
 
 .tier-modal-btn:hover { background: var(--gold-dim); }
+
+/* ─── CONTEXT POPUP ─────────────────────────────────────────── */
+.context-popup {
+  display: none;
+  position: absolute;
+  z-index: 600;
+  width: 260px;
+  background: var(--cream);
+  border: 1px solid var(--gold-dim);
+  box-shadow: 0 8px 28px rgba(0,62,2,0.18);
+  padding: 12px 14px;
+}
+
+.context-popup-label {
+  font-family: 'DM Mono', monospace;
+  font-size: 9px;
+  font-weight: 500;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+  margin-bottom: 8px;
+}
+
+.context-popup-optional {
+  text-transform: none;
+  letter-spacing: 0;
+  opacity: 0.7;
+}
+
+.context-popup-input {
+  width: 100%;
+  background: var(--card-bg);
+  border: 1px solid var(--rule);
+  padding: 8px 10px;
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 14px;
+  color: var(--ink);
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.context-popup-input::placeholder { color: var(--ink-muted); }
+.context-popup-input:focus { border-color: var(--gold); }
+
+.context-popup-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 10px;
+}
+
+.context-popup-add {
+  font-family: 'DM Mono', monospace;
+  font-size: 9px;
+  font-weight: 500;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  padding: 7px 18px;
+  background: var(--gold);
+  color: var(--cream);
+  border: none;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.context-popup-add:hover { background: var(--gold-dim); }
 
 /* ─── RESPONSIVE ────────────────────────────────────────────── */
 @media (max-width: 600px) {

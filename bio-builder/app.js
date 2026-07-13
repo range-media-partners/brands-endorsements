@@ -48,6 +48,7 @@ const TABS = ["Film/TV", "Musician", "Digital", "Sports", "Culinary"];
 let roster         = {};
 let selectedPeople = [];  // flat [{ name, category }] — used only for selection tracking & count
 let featuredNames  = [];  // [{ name, category }] in featured priority order
+let contextByPerson = {}; // { 'category::name': 'short context string' }
 let activeTab      = "Film/TV";
 let isGenerating   = false;
 let generateTimer  = null;
@@ -96,6 +97,9 @@ const resultTitle    = document.getElementById('resultTitle');
 const resultLink     = document.getElementById('resultLink');
 const errorEl        = document.getElementById('error');
 const footerCount    = document.getElementById('footerCount');
+const contextPopup      = document.getElementById('contextPopup');
+const contextPopupInput = document.getElementById('contextPopupInput');
+const contextPopupAdd   = document.getElementById('contextPopupAdd');
 
 // ─── JSONP HELPER ──────────────────────────────────────────────
 function jsonp(url) {
@@ -329,6 +333,10 @@ document.getElementById('categoryTabs').addEventListener('click', e => {
 // ─── HIERARCHY HELPERS ──────────────────────────────────────────
 function getGender(name, category) {
   return (roster[category] || []).find(p => p.name === name)?.gender || '';
+}
+
+function contextKey(name, category) {
+  return `${category}::${name}`;
 }
 
 function addToHierarchy(name, category) {
@@ -642,6 +650,7 @@ function renderGroupingSection() {
 function _fullReset() {
   selectedPeople        = [];
   featuredNames         = [];
+  contextByPerson       = {};
   categoryOrder         = [];
   genderOrderByCategory = {};
   peopleOrderByGroup    = {};
@@ -751,6 +760,71 @@ function setActiveGroup(id) {
   renderTray();
 }
 
+// ─── CONTEXT POPUP ──────────────────────────────────────────────
+// Shown when a not-yet-selected name is clicked, so context ("she has kids",
+// "he owns a dog") can be captured right there instead of scrolling down.
+let _contextPopupTarget = null; // { name, category, card }
+
+function openContextPopup(name, category, card) {
+  _contextPopupTarget = { name, category, card };
+  contextPopupInput.value = '';
+  contextPopup.style.display = 'block';
+
+  const rect = card.getBoundingClientRect();
+  const popupWidth = contextPopup.offsetWidth || 260;
+  let left = rect.left + window.scrollX;
+  const maxLeft = window.scrollX + document.documentElement.clientWidth - popupWidth - 12;
+  if (left > maxLeft) left = Math.max(window.scrollX + 12, maxLeft);
+
+  contextPopup.style.top  = `${rect.bottom + window.scrollY + 6}px`;
+  contextPopup.style.left = `${left}px`;
+
+  requestAnimationFrame(() => contextPopupInput.focus());
+}
+
+function closeContextPopup() {
+  contextPopup.style.display = 'none';
+  _contextPopupTarget = null;
+}
+
+function commitSelection(name, category, card, context) {
+  contextByPerson[contextKey(name, category)] = context || '';
+
+  selectedPeople.push({ name, category });
+  card.classList.add('selected');
+  addToHierarchy(name, category);
+
+  if (groupingMode && activeGroupId) {
+    addPersonToGroup(name, category, activeGroupId);
+    refreshCardGroupIndicators();
+  }
+
+  renderTray();
+  updateGenerateBtn();
+}
+
+contextPopupAdd.addEventListener('click', () => {
+  if (!_contextPopupTarget) return;
+  const { name, category, card } = _contextPopupTarget;
+  commitSelection(name, category, card, contextPopupInput.value.trim());
+  closeContextPopup();
+});
+
+contextPopupInput.addEventListener('keydown', e => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    contextPopupAdd.click();
+  } else if (e.key === 'Escape') {
+    closeContextPopup();
+  }
+});
+
+document.addEventListener('mousedown', e => {
+  if (contextPopup.style.display === 'block' && !contextPopup.contains(e.target)) {
+    closeContextPopup();
+  }
+});
+
 // ─── TOGGLE PERSON ─────────────────────────────────────────────
 function togglePerson(name, category, card) {
   if (groupingMode && activeGroupId) {
@@ -768,6 +842,7 @@ function togglePerson(name, category, card) {
           selectedPeople.splice(idx, 1);
           featuredNames = featuredNames.filter(f => !(f.name === name && f.category === category));
           removeFromHierarchy(name, category);
+          delete contextByPerson[contextKey(name, category)];
         }
         card.classList.remove('selected');
       }
@@ -777,12 +852,12 @@ function togglePerson(name, category, card) {
         showTierConflictModal(pGroups[0], activeGroup);
         return;
       }
-      // Add to selectedPeople if not already there
+      // Not yet selected anywhere — capture context via popup before adding
       if (!selectedPeople.some(p => p.name === name && p.category === category)) {
-        selectedPeople.push({ name, category });
-        card.classList.add('selected');
-        addToHierarchy(name, category);
+        openContextPopup(name, category, card);
+        return;
       }
+      // Already selected (in another group) — just add to this group
       addPersonToGroup(name, category, activeGroupId);
     }
 
@@ -799,10 +874,10 @@ function togglePerson(name, category, card) {
     featuredNames = featuredNames.filter(f => !(f.name === name && f.category === category));
     card.classList.remove('selected');
     removeFromHierarchy(name, category);
+    delete contextByPerson[contextKey(name, category)];
   } else {
-    selectedPeople.push({ name, category });
-    card.classList.add('selected');
-    addToHierarchy(name, category);
+    openContextPopup(name, category, card);
+    return;
   }
   renderTray();
   updateGenerateBtn();
@@ -812,6 +887,7 @@ function togglePerson(name, category, card) {
 function clearAll() {
   selectedPeople        = [];
   featuredNames         = [];
+  contextByPerson       = {};
   categoryOrder         = [];
   genderOrderByCategory = {};
   peopleOrderByGroup    = {};
@@ -1072,6 +1148,16 @@ function renderTray() {
             nameSpan.className = 'selected-row-name';
             nameSpan.textContent = name;
 
+            const contextInput = document.createElement('input');
+            contextInput.type = 'text';
+            contextInput.className = 'selected-row-context';
+            contextInput.placeholder = 'Add context…';
+            contextInput.value = contextByPerson[contextKey(name, cat)] || '';
+            contextInput.addEventListener('mousedown', e => e.stopPropagation());
+            contextInput.addEventListener('input', e => {
+              contextByPerson[contextKey(name, cat)] = e.target.value;
+            });
+
             const removeBtn = document.createElement('button');
             removeBtn.className = 'selected-row-remove';
             removeBtn.title = 'Remove';
@@ -1094,6 +1180,7 @@ function renderTray() {
             row.appendChild(pHandle);
             row.appendChild(starBtn);
             row.appendChild(nameSpan);
+            row.appendChild(contextInput);
             row.appendChild(removeBtn);
 
             if (multiPeople) initDrag(row, genderBody);
@@ -1122,6 +1209,7 @@ function renderTray() {
 function removePerson(name, category) {
   selectedPeople = selectedPeople.filter(p => !(p.name === name && p.category === category));
   featuredNames  = featuredNames.filter(f => !(f.name === name && f.category === category));
+  delete contextByPerson[contextKey(name, category)];
   removeFromHierarchy(name, category);
   removePersonFromAllGroups(name, category);
 
@@ -1200,7 +1288,8 @@ generateBtn.addEventListener('click', async () => {
         index: idx,
         name: g.name.trim() || `${modeLabel} ${idx + 1}`,
         members: groupOrderedMembers(g)
-      })) : null
+      })) : null,
+      contextMap: contextByPerson
     }));
     const data = await jsonp(`${APPS_SCRIPT_URL}?action=generateDocument&payload=${payload}`);
 
