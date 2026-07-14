@@ -50,6 +50,7 @@ let selectedPeople = [];  // flat [{ name, category }] — used only for selecti
 let featuredNames  = [];  // [{ name, category }] in featured priority order
 let contextByPerson = {}; // { 'category::name': 'short context string' }
 let activeTab      = "Film/TV";
+let includeContext = false; // when off, talent is added straight to the tray — no context popup
 let isGenerating   = false;
 let generateTimer  = null;
 let generateSeconds = 0;
@@ -100,6 +101,7 @@ const footerCount    = document.getElementById('footerCount');
 const contextPopup      = document.getElementById('contextPopup');
 const contextPopupInput = document.getElementById('contextPopupInput');
 const contextPopupAdd   = document.getElementById('contextPopupAdd');
+const includeContextInput = document.getElementById('includeContextInput');
 
 // ─── JSONP HELPER ──────────────────────────────────────────────
 function jsonp(url) {
@@ -825,6 +827,10 @@ document.addEventListener('mousedown', e => {
   }
 });
 
+includeContextInput.addEventListener('change', e => {
+  includeContext = e.target.checked;
+});
+
 // ─── TOGGLE PERSON ─────────────────────────────────────────────
 function togglePerson(name, category, card) {
   if (groupingMode && activeGroupId) {
@@ -854,6 +860,10 @@ function togglePerson(name, category, card) {
       }
       // Not yet selected anywhere — capture context via popup before adding
       if (!selectedPeople.some(p => p.name === name && p.category === category)) {
+        if (!includeContext) {
+          commitSelection(name, category, card, '');
+          return;
+        }
         openContextPopup(name, category, card);
         return;
       }
@@ -876,6 +886,10 @@ function togglePerson(name, category, card) {
     removeFromHierarchy(name, category);
     delete contextByPerson[contextKey(name, category)];
   } else {
+    if (!includeContext) {
+      commitSelection(name, category, card, '');
+      return;
+    }
     openContextPopup(name, category, card);
     return;
   }
