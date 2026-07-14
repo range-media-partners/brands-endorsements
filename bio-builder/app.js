@@ -50,7 +50,6 @@ let selectedPeople = [];  // flat [{ name, category }] — used only for selecti
 let featuredNames  = [];  // [{ name, category }] in featured priority order
 let contextByPerson = {}; // { 'category::name': 'short context string' }
 let activeTab      = "Film/TV";
-let includeContext = false; // when off, talent is added straight to the tray — no context popup
 let isGenerating   = false;
 let generateTimer  = null;
 let generateSeconds = 0;
@@ -827,10 +826,6 @@ document.addEventListener('mousedown', e => {
   }
 });
 
-includeContextInput.addEventListener('change', e => {
-  includeContext = e.target.checked;
-});
-
 // ─── TOGGLE PERSON ─────────────────────────────────────────────
 function togglePerson(name, category, card) {
   if (groupingMode && activeGroupId) {
@@ -860,7 +855,7 @@ function togglePerson(name, category, card) {
       }
       // Not yet selected anywhere — capture context via popup before adding
       if (!selectedPeople.some(p => p.name === name && p.category === category)) {
-        if (!includeContext) {
+        if (!includeContextInput.checked) {
           commitSelection(name, category, card, '');
           return;
         }
@@ -886,7 +881,7 @@ function togglePerson(name, category, card) {
     removeFromHierarchy(name, category);
     delete contextByPerson[contextKey(name, category)];
   } else {
-    if (!includeContext) {
+    if (!includeContextInput.checked) {
       commitSelection(name, category, card, '');
       return;
     }
