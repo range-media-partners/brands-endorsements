@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Talent Demographics</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+<header>
+  <h1>Talent Demographics</h1>
+  <label id="range-clients-toggle">
+    <input type="checkbox" id="range-clients-checkbox">
+    Range Clients Only
+  </label>
+</header>
+
+<main>
+  <section id="filter-section">
+    <h2>Filters</h2>
+    <div id="filter-rows"></div>
+    <div id="filter-actions">
+      <button id="add-filter-btn">+ Add Filter</button>
+      <button id="clear-filters-btn">Clear All</button>
+    </div>
+  </section>
+
+  <div id="results-count">Loading…</div>
+
+  <div id="table-wrap">
+    <table id="results-table">
+      <thead><tr id="thead-row"></tr></thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+</main>
+
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>

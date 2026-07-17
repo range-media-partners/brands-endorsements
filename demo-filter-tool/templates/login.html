@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Talent Demographics — Login</title>
+<style>
+  body { background:#0d0d0d; color:#d4d4d4; font-family:-apple-system,sans-serif;
+         display:flex; align-items:center; justify-content:center; height:100vh; margin:0; }
+  form { background:#1a1a1a; border:1px solid #2e2e2e; border-radius:6px; padding:24px; width:280px; }
+  input { width:100%; padding:8px; margin-top:8px; background:#222; border:1px solid #2e2e2e;
+          color:#d4d4d4; border-radius:4px; box-sizing:border-box; }
+  button { width:100%; margin-top:12px; padding:8px; background:#1a472a; border:1px solid #2ecc71;
+           color:#a0f0b0; border-radius:4px; cursor:pointer; }
+  .error { color:#e88; font-size:12px; margin-top:8px; }
+</style>
+</head>
+<body>
+<form method="POST">
+  <label>Password</label>
+  <input type="password" name="password" autofocus>
+  <button type="submit">Enter</button>
+  {% if error %}<div class="error">{{ error }}</div>{% endif %}
+</form>
+</body>
+</html>
