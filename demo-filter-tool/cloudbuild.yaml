@@ -24,7 +24,7 @@ steps:
     id: push-refresh
     waitFor: ['build-refresh']
 
-  - name: 'gcr.io/google.com/cloudsdk-cloud-sdk'
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: gcloud
     args:
       - run
@@ -35,7 +35,7 @@ steps:
     id: deploy-web
     waitFor: ['push-web']
 
-  - name: 'gcr.io/google.com/cloudsdk-cloud-sdk'
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: gcloud
     args:
       - run
