@@ -74,18 +74,9 @@ RANGE_CLIENT_IDS = {
     'RNG-0000680', 'RNG-0003521', 'RNG-0000914', 'RNG-0000935', 'RNG-0004894'
 }
 
-def _connect() -> snowflake.connector.SnowflakeConnection:
-    return snowflake.connector.connect(
-        account=os.environ["SNOWFLAKE_ACCOUNT"],
-        user=os.environ["SNOWFLAKE_USER"],
-        private_key=_load_private_key(),
-        warehouse=os.environ.get("SNOWFLAKE_WAREHOUSE", "LOADING_WH"),
-        role=os.environ.get("SNOWFLAKE_ROLE", "RANGE_DS"),
-    )
 
-
-# Shared by the pairs lookup and both pivot queries below, so the
-# category/criteria derivation logic can't drift between them.
+# Shared by fetch_pivoted() below. The dedup step exists because
+# OBJECT_AGG errors on duplicate keys within a group.
 _BASE_CTES = """
     with range_handle_mapping as (
         select RANGE_ID, DISPLAY_NAME, platform_id
@@ -127,88 +118,56 @@ _BASE_CTES = """
         from range_handle_mapping
             left join talent_demos
                 on platform_id = handle
+    ),
+    dedup as (
+        select RANGE_ID, DISPLAY_NAME, TOTAL_FOLLOWERS, CATEGORY, CRITERIA,
+               MAX(PERCENT_PCT) as PERCENT_PCT,
+               MAX(INDEX_VALUE) as INDEX_VALUE
+        from joined
+        where CATEGORY is not null and CRITERIA is not null
+        group by RANGE_ID, DISPLAY_NAME, TOTAL_FOLLOWERS, CATEGORY, CRITERIA
     )
 """
 
-
-def _fetch_category_criteria_pairs(conn) -> list[tuple[str, str]]:
-    """Distinct (CATEGORY, CRITERIA) combinations — drives how many
-    percent__/index__ columns each pivot query generates (~11,350 pairs,
-    confirmed against DP_TAXONOMY)."""
-    query = _BASE_CTES + """
-        select distinct CATEGORY, CRITERIA
-        from joined
-        where CATEGORY is not null and CRITERIA is not null
-        order by 1, 2
-    """
-    cur = conn.cursor()
-    try:
-        cur.execute(query)
-        return cur.fetchall()
-    finally:
-        cur.close()
+_PIVOT_QUERY = _BASE_CTES + """
+    select
+        RANGE_ID,
+        MAX(DISPLAY_NAME) as DISPLAY_NAME,
+        MAX(TOTAL_FOLLOWERS) as TOTAL_FOLLOWERS,
+        OBJECT_AGG('percent__' || CATEGORY || '__' || CRITERIA, TO_VARIANT(PERCENT_PCT)) as PERCENT_MAP,
+        OBJECT_AGG('index__' || CATEGORY || '__' || CRITERIA, TO_VARIANT(INDEX_VALUE)) as INDEX_MAP
+    from dedup
+    group by RANGE_ID
+    having MAX(TOTAL_FOLLOWERS) is not null
+"""
 
 
-def _escape_literal(text: str) -> str:
-    return text.replace("'", "''")
-
-
-def _escape_ident(text: str) -> str:
-    return text.replace('"', '""')
-
-
-def _build_pivot_query(pairs: list[tuple[str, str]], value_col: str) -> str:
-    """value_col is 'PERCENT_PCT' or 'INDEX_VALUE'. One MAX(CASE WHEN...)
-    conditional-aggregate column per pair, done server-side in Snowflake —
-    the DataFrame we build locally ends up ~1,850 x ~11,350, not the
-    ~5M-row long format that was OOMing the job."""
-    prefix = "percent__" if value_col == "PERCENT_PCT" else "index__"
-    case_lines = []
-    for category, criteria in pairs:
-        cat_lit = _escape_literal(category)
-        crit_lit = _escape_literal(criteria)
-        col_name = _escape_ident(f"{prefix}{category}__{criteria}")
-        case_lines.append(
-            f"MAX(CASE WHEN CATEGORY = '{cat_lit}' AND CRITERIA = '{crit_lit}' "
-            f'THEN {value_col} END) AS "{col_name}"'
-        )
-    case_sql = ",\n        ".join(case_lines)
-
-    return _BASE_CTES + f"""
-        select
-            RANGE_ID,
-            MAX(DISPLAY_NAME) as DISPLAY_NAME,
-            MAX(TOTAL_FOLLOWERS) as TOTAL_FOLLOWERS,
-            {case_sql}
-        from joined
-        group by RANGE_ID
-        having MAX(TOTAL_FOLLOWERS) is not null
-    """
-
-
-def fetch_pivoted_frames() -> tuple[pd.DataFrame, pd.DataFrame]:
+def fetch_pivoted() -> pd.DataFrame:
     conn = _connect()
     try:
-        pairs = _fetch_category_criteria_pairs(conn)
-        percent_df = pd.read_sql(_build_pivot_query(pairs, "PERCENT_PCT"), conn)
-        index_df = pd.read_sql(_build_pivot_query(pairs, "INDEX_VALUE"), conn)
-        return percent_df, index_df
+        return pd.read_sql(_PIVOT_QUERY, conn)
     finally:
         conn.close()
 
 
-def merge_wide(percent_df: pd.DataFrame, index_df: pd.DataFrame) -> list[dict]:
-    """Both frames are already one row per talent — just join them,
-    same shape the frontend already expects."""
-    index_df = index_df.drop(columns=["DISPLAY_NAME", "TOTAL_FOLLOWERS"])
-    wide = percent_df.merge(index_df, on="RANGE_ID", how="inner")
-    wide = wide.rename(columns={
-        "RANGE_ID": "range_id",
-        "DISPLAY_NAME": "display_name",
-        "TOTAL_FOLLOWERS": "total_followers",
-    })
-    wide = wide.where(pd.notnull(wide), None)
-    return wide.to_dict(orient="records")
+def build_records(df: pd.DataFrame) -> list[dict]:
+    """Each row has PERCENT_MAP/INDEX_MAP as a single JSON object (from
+    Snowflake's OBJECT_AGG) instead of thousands of individual columns —
+    unpack those into the same flat percent__/index__ shape the frontend
+    already expects."""
+    records = []
+    for row in df.itertuples(index=False):
+        record = {
+            "range_id": row.RANGE_ID,
+            "display_name": row.DISPLAY_NAME,
+            "total_followers": row.TOTAL_FOLLOWERS,
+        }
+        percent_map = json.loads(row.PERCENT_MAP) if row.PERCENT_MAP else {}
+        index_map = json.loads(row.INDEX_MAP) if row.INDEX_MAP else {}
+        record.update(percent_map)
+        record.update(index_map)
+        records.append(record)
+    return records
 
 
 def attach_range_client_flag(records: list[dict]) -> list[dict]:
@@ -218,8 +177,8 @@ def attach_range_client_flag(records: list[dict]) -> list[dict]:
 
 
 def main():
-    percent_df, index_df = fetch_pivoted_frames()
-    records = merge_wide(percent_df, index_df)
+    df = fetch_pivoted()
+    records = build_records(df)
     records = attach_range_client_flag(records)
 
     payload = {
