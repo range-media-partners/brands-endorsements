@@ -1,3 +1,4 @@
 Flask==3.1.0
 google-cloud-storage
 gunicorn
+Flask-Compress
