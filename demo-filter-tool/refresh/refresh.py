@@ -119,26 +119,38 @@ _BASE_CTES = """
             left join talent_demos
                 on platform_id = handle
     ),
+    talent_identity as (
+        -- one DISPLAY_NAME/TOTAL_FOLLOWERS per RANGE_ID via MAX — immune to
+        -- duplicate/near-duplicate rows in entities
+        select RANGE_ID, MAX(DISPLAY_NAME) as DISPLAY_NAME, MAX(TOTAL_FOLLOWERS) as TOTAL_FOLLOWERS
+        from joined
+        group by RANGE_ID
+        having MAX(TOTAL_FOLLOWERS) is not null
+    ),
     dedup as (
-        select RANGE_ID, DISPLAY_NAME, TOTAL_FOLLOWERS, CATEGORY, CRITERIA,
+        -- collapses to one value per RANGE_ID/CATEGORY/CRITERIA, independent
+        -- of any DISPLAY_NAME/TOTAL_FOLLOWERS differences between duplicates
+        -- (this is what OBJECT_AGG below actually needs to be collision-free)
+        select RANGE_ID, CATEGORY, CRITERIA,
                MAX(PERCENT_PCT) as PERCENT_PCT,
                MAX(INDEX_VALUE) as INDEX_VALUE
         from joined
         where CATEGORY is not null and CRITERIA is not null
-        group by RANGE_ID, DISPLAY_NAME, TOTAL_FOLLOWERS, CATEGORY, CRITERIA
+        group by RANGE_ID, CATEGORY, CRITERIA
     )
 """
 
 _PIVOT_QUERY = _BASE_CTES + """
     select
-        RANGE_ID,
-        MAX(DISPLAY_NAME) as DISPLAY_NAME,
-        MAX(TOTAL_FOLLOWERS) as TOTAL_FOLLOWERS,
-        OBJECT_AGG('percent__' || CATEGORY || '__' || CRITERIA, TO_VARIANT(PERCENT_PCT)) as PERCENT_MAP,
-        OBJECT_AGG('index__' || CATEGORY || '__' || CRITERIA, TO_VARIANT(INDEX_VALUE)) as INDEX_MAP
-    from dedup
-    group by RANGE_ID
-    having MAX(TOTAL_FOLLOWERS) is not null
+        ti.RANGE_ID,
+        ti.DISPLAY_NAME,
+        ti.TOTAL_FOLLOWERS,
+        OBJECT_AGG('percent__' || d.CATEGORY || '__' || d.CRITERIA, TO_VARIANT(d.PERCENT_PCT)) as PERCENT_MAP,
+        OBJECT_AGG('index__' || d.CATEGORY || '__' || d.CRITERIA, TO_VARIANT(d.INDEX_VALUE)) as INDEX_MAP
+    from talent_identity ti
+        inner join dedup d
+            on d.RANGE_ID = ti.RANGE_ID
+    group by ti.RANGE_ID, ti.DISPLAY_NAME, ti.TOTAL_FOLLOWERS
 """
 
 
