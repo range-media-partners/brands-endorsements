@@ -26,18 +26,15 @@ def _load_private_key() -> bytes:
     )
 
 
-def fetch_long_format() -> pd.DataFrame:
-    conn = snowflake.connector.connect(
+def _connect() -> snowflake.connector.SnowflakeConnection:
+    return snowflake.connector.connect(
         account=os.environ["SNOWFLAKE_ACCOUNT"],
         user=os.environ["SNOWFLAKE_USER"],
         private_key=_load_private_key(),
         warehouse=os.environ.get("SNOWFLAKE_WAREHOUSE", "LOADING_WH"),
         role=os.environ.get("SNOWFLAKE_ROLE", "RANGE_DS"),
     )
-    try:
-        return pd.read_sql(QUERY, conn)
-    finally:
-        conn.close()
+
 
 # To be replaced by Snowflake pull eventually once those IDs are stored in Snowflake
 RANGE_CLIENT_IDS = {
@@ -77,21 +74,31 @@ RANGE_CLIENT_IDS = {
     'RNG-0000680', 'RNG-0003521', 'RNG-0000914', 'RNG-0000935', 'RNG-0004894'
 }
 
-# Add database.schema
-QUERY = """
+def _connect() -> snowflake.connector.SnowflakeConnection:
+    return snowflake.connector.connect(
+        account=os.environ["SNOWFLAKE_ACCOUNT"],
+        user=os.environ["SNOWFLAKE_USER"],
+        private_key=_load_private_key(),
+        warehouse=os.environ.get("SNOWFLAKE_WAREHOUSE", "LOADING_WH"),
+        role=os.environ.get("SNOWFLAKE_ROLE", "RANGE_DS"),
+    )
+
+
+# Shared by the pairs lookup and both pivot queries below, so the
+# category/criteria derivation logic can't drift between them.
+_BASE_CTES = """
     with range_handle_mapping as (
         select RANGE_ID, DISPLAY_NAME, platform_id
         from range.analytics.entities
             inner join range.analytics.platform_ids
                 using (RANGE_ID)
-        where 1=1
-            and entity_type = 'talent'
+        where entity_type = 'talent'
             and platform = 'instagram'
     ),
     talent_demos as (
-        select handle, LABEL as CRITERIA, pct as PERCENT, 
-        
-        CASE 
+        select handle, LABEL as CRITERIA, pct * 100 as PERCENT_PCT,
+
+        CASE
             WHEN pct_median < 0.0001 and pct_mean < 0.0001 THEN pct/0.0001
             when pct_median < 0.0001 then pct / pct_mean
             else pct/pct_median
@@ -101,58 +108,106 @@ QUERY = """
             WHEN section_name IN ('Marital status', 'Parental status') THEN 'Family status'
             ELSE section_name
         end as CATEGORY,
-        
+
         followers_submitted as TOTAL_FOLLOWERS
-        
+
         from range.analytics.dp_handle_demos
             inner join range.analytics.dp_taxonomy
                 using (code)
             inner join range.analytics.dp_handles
                 using (handle)
-        where 1=1
-            and SECTION_NAME NOT IN (
-                'Location: by city', 'Education Organization', 'Age - Census', 'Hashtags', 'Media', 'Occupations', 'Music - bands', 'Music - solo artists',
-                'Likes & interests', 'Industries', 'Employer', 'Influences'
-            )
-            and network = 'instagram' -- Only Instagram
+        where SECTION_NAME NOT IN (
+            'Location: by city', 'Education Organization', 'Age - Census', 'Hashtags', 'Media', 'Occupations', 'Music - bands', 'Music - solo artists',
+            'Likes & interests', 'Industries', 'Employer', 'Influences'
+        )
+        and network = 'instagram'
+    ),
+    joined as (
+        select RANGE_ID, DISPLAY_NAME, TOTAL_FOLLOWERS, CATEGORY, CRITERIA, PERCENT_PCT, INDEX_VALUE
+        from range_handle_mapping
+            left join talent_demos
+                on platform_id = handle
     )
-    select DISTINCT RANGE_ID, DISPLAY_NAME, TOTAL_FOLLOWERS, CATEGORY, CRITERIA, PERCENT, INDEX_VALUE
-    from range_handle_mapping
-        left join talent_demos
-            on platform_id = handle
-    WHERE TOTAL_FOLLOWERS IS NOT NULL
-    ORDER BY TOTAL_FOLLOWERS DESC, DISPLAY_NAME, INDEX_VALUE DESC
-;
 """
 
 
-def pivot_wide(df: pd.DataFrame) -> list[dict]:
-    """Long format (one row per artist x category x criteria) -> wide format
-    (one row per artist, index__/percent__ flat columns) — same shape the
-    frontend already expects, so nothing downstream has to change."""
-    base = (
-        df[["RANGE_ID", "DISPLAY_NAME", "TOTAL_FOLLOWERS"]]
-        .drop_duplicates(subset="RANGE_ID")
-        .rename(columns={
-            "RANGE_ID": "range_id",
-            "DISPLAY_NAME": "display_name",
-            "TOTAL_FOLLOWERS": "total_followers",
-        })
-        .set_index("range_id")
-    )
+def _fetch_category_criteria_pairs(conn) -> list[tuple[str, str]]:
+    """Distinct (CATEGORY, CRITERIA) combinations — drives how many
+    percent__/index__ columns each pivot query generates (~11,350 pairs,
+    confirmed against DP_TAXONOMY)."""
+    query = _BASE_CTES + """
+        select distinct CATEGORY, CRITERIA
+        from joined
+        where CATEGORY is not null and CRITERIA is not null
+        order by 1, 2
+    """
+    cur = conn.cursor()
+    try:
+        cur.execute(query)
+        return cur.fetchall()
+    finally:
+        cur.close()
 
-    demo = df.dropna(subset=["CATEGORY", "CRITERIA"]).copy()
-    demo["PERCENT_PCT"] = demo["PERCENT"] * 100  # 0-1 -> 0-100, matches old frontend format
-    demo["pct_col"] = "percent__" + demo["CATEGORY"] + "__" + demo["CRITERIA"]
-    demo["idx_col"] = "index__" + demo["CATEGORY"] + "__" + demo["CRITERIA"]
 
-    pct_wide = demo.pivot_table(index="RANGE_ID", columns="pct_col", values="PERCENT_PCT", aggfunc="first")
-    idx_wide = demo.pivot_table(index="RANGE_ID", columns="idx_col", values="INDEX_VALUE", aggfunc="first")
-    pct_wide.index.name = "range_id"
-    idx_wide.index.name = "range_id"
+def _escape_literal(text: str) -> str:
+    return text.replace("'", "''")
 
-    wide = base.join(pct_wide).join(idx_wide).reset_index()
-    wide = wide.where(pd.notnull(wide), None)  # NaN -> null so it serializes cleanly to JSON
+
+def _escape_ident(text: str) -> str:
+    return text.replace('"', '""')
+
+
+def _build_pivot_query(pairs: list[tuple[str, str]], value_col: str) -> str:
+    """value_col is 'PERCENT_PCT' or 'INDEX_VALUE'. One MAX(CASE WHEN...)
+    conditional-aggregate column per pair, done server-side in Snowflake —
+    the DataFrame we build locally ends up ~1,850 x ~11,350, not the
+    ~5M-row long format that was OOMing the job."""
+    prefix = "percent__" if value_col == "PERCENT_PCT" else "index__"
+    case_lines = []
+    for category, criteria in pairs:
+        cat_lit = _escape_literal(category)
+        crit_lit = _escape_literal(criteria)
+        col_name = _escape_ident(f"{prefix}{category}__{criteria}")
+        case_lines.append(
+            f"MAX(CASE WHEN CATEGORY = '{cat_lit}' AND CRITERIA = '{crit_lit}' "
+            f'THEN {value_col} END) AS "{col_name}"'
+        )
+    case_sql = ",\n        ".join(case_lines)
+
+    return _BASE_CTES + f"""
+        select
+            RANGE_ID,
+            MAX(DISPLAY_NAME) as DISPLAY_NAME,
+            MAX(TOTAL_FOLLOWERS) as TOTAL_FOLLOWERS,
+            {case_sql}
+        from joined
+        group by RANGE_ID
+        having MAX(TOTAL_FOLLOWERS) is not null
+    """
+
+
+def fetch_pivoted_frames() -> tuple[pd.DataFrame, pd.DataFrame]:
+    conn = _connect()
+    try:
+        pairs = _fetch_category_criteria_pairs(conn)
+        percent_df = pd.read_sql(_build_pivot_query(pairs, "PERCENT_PCT"), conn)
+        index_df = pd.read_sql(_build_pivot_query(pairs, "INDEX_VALUE"), conn)
+        return percent_df, index_df
+    finally:
+        conn.close()
+
+
+def merge_wide(percent_df: pd.DataFrame, index_df: pd.DataFrame) -> list[dict]:
+    """Both frames are already one row per talent — just join them,
+    same shape the frontend already expects."""
+    index_df = index_df.drop(columns=["DISPLAY_NAME", "TOTAL_FOLLOWERS"])
+    wide = percent_df.merge(index_df, on="RANGE_ID", how="inner")
+    wide = wide.rename(columns={
+        "RANGE_ID": "range_id",
+        "DISPLAY_NAME": "display_name",
+        "TOTAL_FOLLOWERS": "total_followers",
+    })
+    wide = wide.where(pd.notnull(wide), None)
     return wide.to_dict(orient="records")
 
 
@@ -163,8 +218,8 @@ def attach_range_client_flag(records: list[dict]) -> list[dict]:
 
 
 def main():
-    df = fetch_long_format()
-    records = pivot_wide(df)
+    percent_df, index_df = fetch_pivoted_frames()
+    records = merge_wide(percent_df, index_df)
     records = attach_range_client_flag(records)
 
     payload = {
