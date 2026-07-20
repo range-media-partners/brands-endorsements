@@ -77,6 +77,7 @@ RANGE_CLIENT_IDS = {
 
 # Shared by fetch_pivoted() below. The dedup step exists because
 # OBJECT_AGG errors on duplicate keys within a group.
+# Removed Brands
 _BASE_CTES = """
     with range_handle_mapping as (
         select RANGE_ID, DISPLAY_NAME, platform_id
@@ -109,7 +110,7 @@ _BASE_CTES = """
                 using (handle)
         where SECTION_NAME NOT IN (
             'Location: by city', 'Education Organization', 'Age - Census', 'Hashtags', 'Media', 'Occupations', 'Music - bands', 'Music - solo artists',
-            'Likes & interests', 'Industries', 'Employer', 'Influences'
+            'Likes & interests', 'Industries', 'Employer', 'Influences', 'Brands'
         )
         and network = 'instagram'
     ),
