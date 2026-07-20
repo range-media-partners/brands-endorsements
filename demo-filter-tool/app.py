@@ -1,13 +1,14 @@
 import os
 from functools import wraps
 from flask import Flask, request, session, redirect, url_for, render_template, jsonify
+from flask_compress import Compress
 
 from data import get_talent_data
 
 app = Flask(__name__)
 app.secret_key = os.environ["FLASK_SECRET_KEY"]
 DASHBOARD_PASSWORD = os.environ["DASHBOARD_PASSWORD"]
-
+Compress(app)
 
 def login_required(view):
     @wraps(view)
