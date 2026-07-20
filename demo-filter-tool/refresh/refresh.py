@@ -125,20 +125,6 @@ QUERY = """
 """
 
 
-def fetch_long_format() -> pd.DataFrame:
-    conn = snowflake.connector.connect(
-        account=os.environ["SNOWFLAKE_ACCOUNT"],
-        user=os.environ["SNOWFLAKE_USER"],
-        password=os.environ["SNOWFLAKE_PASSWORD"],
-        warehouse=os.environ.get("SNOWFLAKE_WAREHOUSE", "LOADING_WH"),
-        role=os.environ.get("SNOWFLAKE_ROLE", "RANGE_DS"),
-    )
-    try:
-        return pd.read_sql(QUERY, conn)
-    finally:
-        conn.close()
-
-
 def pivot_wide(df: pd.DataFrame) -> list[dict]:
     """Long format (one row per artist x category x criteria) -> wide format
     (one row per artist, index__/percent__ flat columns) — same shape the
