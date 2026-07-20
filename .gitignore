@@ -4,3 +4,7 @@
 !.dev.vars.example
 .env*
 !.env.example
+*.p8
+*.pub
+*.pub.stripped
+.DS_Store
