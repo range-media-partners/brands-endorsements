@@ -77,6 +77,7 @@ RANGE_CLIENT_IDS = {
     'RNG-0000680', 'RNG-0003521', 'RNG-0000914', 'RNG-0000935', 'RNG-0004894'
 }
 
+# Add database.schema
 QUERY = """
     with range_handle_mapping as (
         select RANGE_ID, DISPLAY_NAME, platform_id
@@ -106,7 +107,7 @@ QUERY = """
         from range.analytics.dp_handle_demos
             inner join range.analytics.dp_taxonomy
                 using (code)
-            inner join dp_handles
+            inner join range.analytics.dp_handles
                 using (handle)
         where 1=1
             and SECTION_NAME NOT IN (
