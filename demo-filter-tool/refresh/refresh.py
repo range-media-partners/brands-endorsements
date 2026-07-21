@@ -83,7 +83,7 @@ _BASE_CTES = """
             ELSE SECTION_NAME
         end as CATEGORY,
 
-        followers_submitted as TOTAL_FOLLOWERS
+        ESTIMATED_SIZE
 
         from range.analytics.dp_handle_demos
             inner join range.analytics.dp_taxonomy
@@ -97,7 +97,8 @@ _BASE_CTES = """
         and network = 'instagram'
     ),
     joined as (
-        select RANGE_ID, DISPLAY_NAME, TOTAL_FOLLOWERS, platform_id as INSTAGRAM_HANDLE, CATEGORY, CRITERIA, PERCENT_PCT, INDEX_VALUE
+        select RANGE_ID, DISPLAY_NAME, platform_id as INSTAGRAM_HANDLE, CATEGORY, CRITERIA, PERCENT_PCT, INDEX_VALUE,
+            ESTIMATED_SIZE/(CASE WHEN PERCENT_PCT = 0 THEN 0.000000001 ELSE PERCENT_PCT END) * 100 as TOTAL_FOLLOWERS
         from range_handle_mapping
             left join talent_demos
                 on platform_id = handle
