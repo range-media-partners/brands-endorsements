@@ -65,6 +65,10 @@
   // ── Range Clients toggle ─────────────────────────────────────────────
   document.getElementById('range-clients-checkbox').addEventListener('change', render);
 
+// ── Total Followers filter ────────────────────────────────────────────
+  document.getElementById('followers-min').addEventListener('input', triggerRefilter);
+  document.getElementById('followers-max').addEventListener('input', triggerRefilter);
+
   function addFilterRow() {
     const id = ++filterIdSeq;
     const container = document.getElementById('filter-rows');
@@ -149,6 +153,27 @@
       }
     });
     return active;
+  }
+
+  function collectFollowersFilter() {
+    const minRaw = document.getElementById('followers-min').value;
+    const maxRaw = document.getElementById('followers-max').value;
+    const min = minRaw !== '' && isFinite(parseFloat(minRaw)) ? parseFloat(minRaw) : null;
+    const max = maxRaw !== '' && isFinite(parseFloat(maxRaw)) ? parseFloat(maxRaw) : null;
+    if (min === null && max === null) return null;
+    return { min, max };
+  }
+
+  function applyFollowersFilter(data) {
+    const f = collectFollowersFilter();
+    if (!f) return data;
+    return data.filter(record => {
+      const v = record.total_followers;
+      if (v === null || v === undefined) return false;
+      if (f.min !== null && v < f.min) return false;
+      if (f.max !== null && v > f.max) return false;
+      return true;
+    });
   }
 
   function applyFilters(data, activeFilters) {
@@ -239,7 +264,8 @@
 
   function render() {
     const rangeClientsOnly = document.getElementById('range-clients-checkbox').checked;
-    const base = rangeClientsOnly ? allData.filter(r => r.is_range_client) : allData;
+    let base = rangeClientsOnly ? allData.filter(r => r.is_range_client) : allData;
+    base = applyFollowersFilter(base);
 
     const activeFilters = collectFilters();
     const filtered = applyFilters(base, activeFilters);
