@@ -86,6 +86,18 @@ main {
   margin-bottom: 12px;
 }
 
+#index-explainer {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 16px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+#index-explainer strong {
+  color: var(--text-hi);
+}
+
 #filter-rows {
   display: flex;
   flex-direction: column;
@@ -279,6 +291,15 @@ tbody tr:last-child td { border-bottom: none; }
 tbody tr:hover td { background: var(--bg-3); }
 
 .em-dash { color: var(--text-dim); }
+
+td.copyable {
+  cursor: pointer;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+td.copyable:hover {
+  background: var(--accent-dim);
+}
 
 .no-data td {
   color: var(--text-dim);
