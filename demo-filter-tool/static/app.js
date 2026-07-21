@@ -213,7 +213,13 @@
       {
         key: 'display_name', label: 'Display Name',
         accessor: r => r.display_name,
-        format: v => v != null ? String(v) : '—',
+        format: (v, r) => {
+          if (v == null) return '—';
+          const name = escHtml(String(v));
+          if (!r.instagram_handle) return name;
+          const url = 'https://www.instagram.com/' + encodeURIComponent(r.instagram_handle) + '/';
+          return '<a href="' + url + '" target="_blank" rel="noopener noreferrer" class="talent-link">' + name + '</a>';
+        },
         numeric: false
       },
       {
@@ -332,7 +338,7 @@
         const td = document.createElement('td');
         if (col.numeric) td.classList.add('num');
         const value = col.accessor(record);
-        td.innerHTML = col.format(value);
+        td.innerHTML = col.format(value, record);
         if (col.copyable && value != null) {
           td.classList.add('copyable');
           td.title = 'Click to copy comparison text';

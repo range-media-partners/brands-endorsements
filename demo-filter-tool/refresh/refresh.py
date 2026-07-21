@@ -97,15 +97,15 @@ _BASE_CTES = """
         and network = 'instagram'
     ),
     joined as (
-        select RANGE_ID, DISPLAY_NAME, TOTAL_FOLLOWERS, CATEGORY, CRITERIA, PERCENT_PCT, INDEX_VALUE
+        select RANGE_ID, DISPLAY_NAME, TOTAL_FOLLOWERS, platform_id as INSTAGRAM_HANDLE, CATEGORY, CRITERIA, PERCENT_PCT, INDEX_VALUE
         from range_handle_mapping
             left join talent_demos
                 on platform_id = handle
     ),
     talent_identity as (
-        -- one DISPLAY_NAME/TOTAL_FOLLOWERS per RANGE_ID via MAX — immune to
-        -- duplicate/near-duplicate rows in entities
-        select RANGE_ID, MAX(DISPLAY_NAME) as DISPLAY_NAME, MAX(TOTAL_FOLLOWERS) as TOTAL_FOLLOWERS
+        -- one DISPLAY_NAME/TOTAL_FOLLOWERS/INSTAGRAM_HANDLE per RANGE_ID via MAX
+        -- immune to duplicate/near-duplicate rows in entities
+        select RANGE_ID, MAX(DISPLAY_NAME) as DISPLAY_NAME, MAX(TOTAL_FOLLOWERS) as TOTAL_FOLLOWERS, MAX(INSTAGRAM_HANDLE) as INSTAGRAM_HANDLE
         from joined
         group by RANGE_ID
         having MAX(TOTAL_FOLLOWERS) is not null
@@ -128,12 +128,13 @@ _PIVOT_QUERY = _BASE_CTES + """
         ti.RANGE_ID,
         ti.DISPLAY_NAME,
         ti.TOTAL_FOLLOWERS,
+        ti.INSTAGRAM_HANDLE,
         OBJECT_AGG('percent__' || d.CATEGORY || '__' || d.CRITERIA, TO_VARIANT(d.PERCENT_PCT)) as PERCENT_MAP,
         OBJECT_AGG('index__' || d.CATEGORY || '__' || d.CRITERIA, TO_VARIANT(d.INDEX_VALUE)) as INDEX_MAP
     from talent_identity ti
         inner join dedup d
             on d.RANGE_ID = ti.RANGE_ID
-    group by ti.RANGE_ID, ti.DISPLAY_NAME, ti.TOTAL_FOLLOWERS
+    group by ti.RANGE_ID, ti.DISPLAY_NAME, ti.TOTAL_FOLLOWERS, ti.INSTAGRAM_HANDLE
 """
 
 
@@ -183,10 +184,11 @@ def build_records(df: pd.DataFrame, columns: list[dict]) -> list[dict]:
             percent.append(p_val)
             index.append(index_map.get("index__" + category + "__" + criteria))
 
-        records.append({
+            records.append({
             "range_id": row.RANGE_ID,
             "display_name": row.DISPLAY_NAME,
             "total_followers": row.TOTAL_FOLLOWERS,
+            "instagram_handle": row.INSTAGRAM_HANDLE,
             "idx": idx,
             "percent": percent,
             "index": index,
