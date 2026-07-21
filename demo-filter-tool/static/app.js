@@ -176,6 +176,12 @@
     });
   }
 
+  function geometricMeanIndex(indexValues) {
+    if (!indexValues.length) return null;
+    const sumLogs = indexValues.reduce((acc, v) => acc + Math.log(v), 0);
+    return Math.exp(sumLogs / indexValues.length);
+  }
+
   function buildColumns(activeFilters) {
     const cols = [
       {
@@ -206,9 +212,27 @@
         key: 'index_' + colIdx, label: shortLabel + ' Index',
         accessor: r => r._byCol[colIdx] ? r._byCol[colIdx].index : null,
         format: v => v != null ? Number(v).toFixed(2) : '<span class="em-dash">—</span>',
-        numeric: true
+        numeric: true,
+        copyable: true,
+        criteria: f.crit
       });
     });
+
+    if (activeFilters.length > 1) {
+        cols.push({
+            key: 'avg_index',
+            label: 'Average Index',
+            accessor: r => {
+            const vals = activeFilters.map(f => {
+                const colIdx = colKeyToIndex[f.cat + '__' + f.crit];
+                return r._byCol[colIdx] ? r._byCol[colIdx].index : null;
+            });
+            return geometricMeanIndex(vals);
+            },
+            format: v => v != null ? Number(v).toFixed(2) : '<span class="em-dash">—</span>',
+            numeric: true
+        });
+    }
 
     return cols;
   }
@@ -275,17 +299,40 @@
       return;
     }
 
-    sorted.forEach(record => {
+  sorted.forEach(record => {
       const tr = document.createElement('tr');
       cols.forEach(col => {
         const td = document.createElement('td');
         if (col.numeric) td.classList.add('num');
-        td.innerHTML = col.format(col.accessor(record));
+        const value = col.accessor(record);
+        td.innerHTML = col.format(value);
+        if (col.copyable && value != null) {
+          td.classList.add('copyable');
+          td.title = 'Click to copy comparison text';
+          td.addEventListener('click', () => copyIndexComparison(record, col, value, td));
+        }
         tr.appendChild(td);
       });
       tbody.appendChild(tr);
     });
   }
+
+  function copyIndexComparison(record, col, value, td) {
+    const pct = Math.round(Math.abs(value - 1) * 100);
+    const direction = value >= 1 ? 'more' : 'fewer';
+    const demo = col.criteria.toLowerCase();
+    const text = record.display_name + ' has ' + pct + '% ' + direction + ' ' + demo +
+      ' followers than the Instagram average.';
+
+    navigator.clipboard.writeText(text).then(() => {
+      const original = td.innerHTML;
+      td.innerHTML = 'Index copied';
+      setTimeout(() => { td.innerHTML = original; }, 1200);
+    }).catch(err => {
+      console.error('Copy failed:', err);
+    });
+  }
+
 
   function triggerRefilter() {
     render();

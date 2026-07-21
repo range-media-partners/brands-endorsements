@@ -97,8 +97,14 @@ _BASE_CTES = """
         end as INDEX_VALUE,
 
         CASE
-            WHEN section_name IN ('Marital status', 'Parental status') THEN 'Family status'
-            ELSE section_name
+            WHEN section_name IN ('Marital status', 'Parental status')  THEN 'Family status'
+            WHEN section_name = 'Age - Nielsen'                         THEN 'Age'
+            WHEN section_name = 'Personal income'                       THEN 'Income'
+            WHEN section_name = 'Sports - teams supported'              THEN 'Sports teams supported'
+            WHEN section_name = 'Education status/level'                THEN 'Education level'
+            WHEN section_name = 'Music'                                 THEN 'Favorite Music'
+            WHEN section_name = 'Sport'                                 THEN 'Favorite Sport'
+            ELSE SECTION_NAME
         end as CATEGORY,
 
         followers_submitted as TOTAL_FOLLOWERS
