@@ -184,7 +184,8 @@ def build_records(df: pd.DataFrame, columns: list[dict]) -> list[dict]:
             percent.append(p_val)
             index.append(index_map.get("index__" + category + "__" + criteria))
 
-            records.append({
+            # Minor update
+        records.append({
             "range_id": row.RANGE_ID,
             "display_name": row.DISPLAY_NAME,
             "total_followers": row.TOTAL_FOLLOWERS,
