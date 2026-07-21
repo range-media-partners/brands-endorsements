@@ -10,6 +10,7 @@
   let filterIdSeq = 0;
   let columns = [];
   let colKeyToIndex = {};
+  // minor precision updates. Adding this line to force push.
 
   // ── Load data from the API (once, on page load) ─────────────────────────
   document.addEventListener('DOMContentLoaded', loadData);
@@ -230,7 +231,7 @@
       cols.push({
         key: 'percent_' + colIdx, label: shortLabel + ' %',
         accessor: r => r._byCol[colIdx] ? r._byCol[colIdx].percent : null,
-        format: v => v != null ? Number(v).toFixed(1) + '%' : '<span class="em-dash">—</span>',
+        format: v => v != null ? Number(v).toFixed(2) + '%' : '<span class="em-dash">—</span>',
         numeric: true
       });
       cols.push({
