@@ -163,23 +163,52 @@ def fetch_pivoted() -> pd.DataFrame:
         conn.close()
 
 
-def build_records(df: pd.DataFrame) -> list[dict]:
-    """Each row has PERCENT_MAP/INDEX_MAP as a single JSON object (from
-    Snowflake's OBJECT_AGG) instead of thousands of individual columns —
-    unpack those into the same flat percent__/index__ shape the frontend
-    already expects."""
+def _parse_pair_key(key: str, prefix: str) -> tuple[str, str]:
+    """'percent__CATEGORY__CRITERIA' -> (CATEGORY, CRITERIA). Criteria may
+    itself contain '__', so only split on the first '__' after the prefix."""
+    category, _, criteria = key[len(prefix):].partition("__")
+    return category, criteria
+
+
+def build_columns(df: pd.DataFrame) -> list[dict]:
+    """Distinct (category, criteria) pairs across all records, sorted for
+    a stable column order run-to-run."""
+    pairs = set()
+    for row in df.itertuples(index=False):
+        percent_map = json.loads(row.PERCENT_MAP) if row.PERCENT_MAP else {}
+        for key, val in percent_map.items():
+            if val is None:
+                continue
+            pairs.add(_parse_pair_key(key, "percent__"))
+    return [{"category": c, "criteria": r} for c, r in sorted(pairs)]
+
+
+def build_records(df: pd.DataFrame, columns: list[dict]) -> list[dict]:
+    """Sparse shape: idx[i]/percent[i]/index[i] are parallel. idx[i] is the
+    position in `columns`. Pairs absent or null for a talent are omitted."""
+    col_index = {(c["category"], c["criteria"]): i for i, c in enumerate(columns)}
     records = []
     for row in df.itertuples(index=False):
-        record = {
+        percent_map = json.loads(row.PERCENT_MAP) if row.PERCENT_MAP else {}
+        index_map = json.loads(row.INDEX_MAP) if row.INDEX_MAP else {}
+
+        idx, percent, index = [], [], []
+        for key, p_val in percent_map.items():
+            if p_val is None:
+                continue
+            category, criteria = _parse_pair_key(key, "percent__")
+            idx.append(col_index[(category, criteria)])
+            percent.append(p_val)
+            index.append(index_map.get("index__" + category + "__" + criteria))
+
+        records.append({
             "range_id": row.RANGE_ID,
             "display_name": row.DISPLAY_NAME,
             "total_followers": row.TOTAL_FOLLOWERS,
-        }
-        percent_map = json.loads(row.PERCENT_MAP) if row.PERCENT_MAP else {}
-        index_map = json.loads(row.INDEX_MAP) if row.INDEX_MAP else {}
-        record.update(percent_map)
-        record.update(index_map)
-        records.append(record)
+            "idx": idx,
+            "percent": percent,
+            "index": index,
+        })
     return records
 
 
@@ -191,11 +220,13 @@ def attach_range_client_flag(records: list[dict]) -> list[dict]:
 
 def main():
     df = fetch_pivoted()
-    records = build_records(df)
+    columns = build_columns(df)
+    records = build_records(df, columns)
     records = attach_range_client_flag(records)
 
     payload = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
+        "columns": columns,
         "data": records,
     }
 

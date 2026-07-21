@@ -8,6 +8,8 @@
   let sortCol    = 'total_followers';
   let sortAsc    = false;
   let filterIdSeq = 0;
+  let columns = [];
+  let colKeyToIndex = {};
 
   // ── Load data from the API (once, on page load) ─────────────────────────
   document.addEventListener('DOMContentLoaded', loadData);
@@ -16,9 +18,12 @@
     try {
       const res = await fetch('/api/data');
       if (!res.ok) throw new Error('HTTP ' + res.status);
-      const data = await res.json();
-      allData = data;
-      discoverCategories(data);
+      const payload = await res.json();
+      columns = payload.columns;
+      allData = payload.data;
+      buildColumnIndex(columns);
+      discoverCategories(columns);
+      indexRecords(allData);
       render();
     } catch (err) {
       document.getElementById('results-count').textContent =
@@ -26,17 +31,26 @@
     }
   }
 
-  function discoverCategories(data) {
+  function discoverCategories(cols) {
     categories = {};
-    if (!data.length) return;
-    Object.keys(data[0]).forEach(k => {
-      if (!k.startsWith('index__')) return;
-      const parts = k.split('__');
-      if (parts.length < 3) return;
-      const cat  = parts[1];
-      const crit = parts.slice(2).join('__');
-      if (!categories[cat]) categories[cat] = [];
-      if (!categories[cat].includes(crit)) categories[cat].push(crit);
+    cols.forEach(c => {
+      if (!categories[c.category]) categories[c.category] = [];
+      categories[c.category].push(c.criteria);
+    });
+  }
+
+  function buildColumnIndex(cols) {
+    colKeyToIndex = {};
+    cols.forEach((c, i) => { colKeyToIndex[c.category + '__' + c.criteria] = i; });
+  }
+
+  function indexRecords(data) {
+    data.forEach(r => {
+      const byCol = {};
+      for (let i = 0; i < r.idx.length; i++) {
+        byCol[r.idx[i]] = { percent: r.percent[i], index: r.index[i] };
+      }
+      r._byCol = byCol;
     });
   }
 
@@ -141,17 +155,19 @@
     if (!activeFilters.length) return data;
     return data.filter(record => {
       return activeFilters.every(f => {
-        const key = 'index__' + f.cat + '__' + f.crit;
-        const v   = record[key];
-        if (v === null || v === undefined) return false;
-        return f.dir === '>' ? v > f.val : v < f.val;
+        const colIdx = colKeyToIndex[f.cat + '__' + f.crit];
+        const entry = record._byCol[colIdx];
+        if (!entry || entry.index == null) return false;
+        return f.dir === '>' ? entry.index > f.val : entry.index < f.val;
       });
     });
   }
 
-  function sortData(data, col, asc) {
+  function sortData(data, cols, col, asc) {
+    const colDef = cols.find(c => c.key === col);
+    const accessor = colDef ? colDef.accessor : r => r[col];
     return [...data].sort((a, b) => {
-      let av = a[col], bv = b[col];
+      let av = accessor(a), bv = accessor(b);
       if (av === null || av === undefined) av = asc ? Infinity : -Infinity;
       if (bv === null || bv === undefined) bv = asc ? Infinity : -Infinity;
       if (av < bv) return asc ? -1 : 1;
@@ -163,33 +179,32 @@
   function buildColumns(activeFilters) {
     const cols = [
       {
-        key: 'display_name',
-        label: 'Display Name',
+        key: 'display_name', label: 'Display Name',
+        accessor: r => r.display_name,
         format: v => v != null ? String(v) : '—',
         numeric: false
       },
       {
-        key: 'total_followers',
-        label: 'Total Followers',
+        key: 'total_followers', label: 'Total Followers',
+        accessor: r => r.total_followers,
         format: v => v != null ? Number(v).toLocaleString('en-US', { maximumFractionDigits: 0 }) : '<span class="em-dash">—</span>',
         numeric: true
       }
     ];
 
     activeFilters.forEach(f => {
-      const pctKey   = 'percent__' + f.cat + '__' + f.crit;
-      const idxKey   = 'index__'   + f.cat + '__' + f.crit;
+      const colIdx = colKeyToIndex[f.cat + '__' + f.crit];
       const shortLabel = f.crit;
 
       cols.push({
-        key: pctKey,
-        label: shortLabel + ' %',
+        key: 'percent_' + colIdx, label: shortLabel + ' %',
+        accessor: r => r._byCol[colIdx] ? r._byCol[colIdx].percent : null,
         format: v => v != null ? Number(v).toFixed(1) + '%' : '<span class="em-dash">—</span>',
         numeric: true
       });
       cols.push({
-        key: idxKey,
-        label: shortLabel + ' Index',
+        key: 'index_' + colIdx, label: shortLabel + ' Index',
+        accessor: r => r._byCol[colIdx] ? r._byCol[colIdx].index : null,
         format: v => v != null ? Number(v).toFixed(2) : '<span class="em-dash">—</span>',
         numeric: true
       });
@@ -203,15 +218,16 @@
     const base = rangeClientsOnly ? allData.filter(r => r.is_range_client) : allData;
 
     const activeFilters = collectFilters();
-    const filtered      = applyFilters(base, activeFilters);
-    const sorted        = sortData(filtered, sortCol, sortAsc);
-    const cols          = buildColumns(activeFilters);
+    const filtered = applyFilters(base, activeFilters);
+    const cols = buildColumns(activeFilters);
 
     const validKeys = new Set(cols.map(c => c.key));
     if (!validKeys.has(sortCol)) {
       sortCol = 'total_followers';
       sortAsc = false;
     }
+
+    const sorted = sortData(filtered, cols, sortCol, sortAsc);
 
     document.getElementById('clear-filters-btn').disabled =
       document.querySelectorAll('.filter-row').length === 0;
@@ -264,7 +280,7 @@
       cols.forEach(col => {
         const td = document.createElement('td');
         if (col.numeric) td.classList.add('num');
-        td.innerHTML = col.format(record[col.key]);
+        td.innerHTML = col.format(col.accessor(record));
         tr.appendChild(td);
       });
       tbody.appendChild(tr);
