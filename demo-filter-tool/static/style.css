@@ -98,6 +98,18 @@ main {
   color: var(--text-hi);
 }
 
+#average-index-explainer {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 16px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+#average-index-explainer strong {
+  color: var(--text-hi);
+}
+
 #filter-rows {
   display: flex;
   flex-direction: column;
