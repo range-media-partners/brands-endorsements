@@ -86,18 +86,7 @@ main {
   margin-bottom: 12px;
 }
 
-#index-explainer {
-  background: var(--bg-2);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 10px 16px;
-  font-size: 12px;
-  color: var(--text-dim);
-}
-#index-explainer strong {
-  color: var(--text-hi);
-}
-
+#index-explainer,
 #average-index-explainer {
   background: var(--bg-2);
   border: 1px solid var(--border);
@@ -106,8 +95,35 @@ main {
   font-size: 12px;
   color: var(--text-dim);
 }
+
+#index-explainer summary,
+#average-index-explainer summary {
+  color: var(--text-hi);
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+}
+
+#index-explainer ul,
+#average-index-explainer ul {
+  margin-left: 18px;
+  margin-top: 6px;
+}
+
+#index-explainer li,
+#average-index-explainer li {
+  color: var(--text);
+}
+
+#index-explainer strong,
 #average-index-explainer strong {
   color: var(--text-hi);
+}
+
+.indented-text {
+  margin-left: 18px;
+  margin-top: 4px;
+  color: var(--text);
 }
 
 #filter-rows {
